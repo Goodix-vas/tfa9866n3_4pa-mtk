@@ -1,0 +1,15 @@
+menu "Goodix TFA9866 amplifier configuration"
+
+if SND_SOC_TFA986X
+config TFA_STEREO_NODE
+        bool "Stereo sysfs node support"
+        default y
+        help
+          Extend sysfs nodes for stereo support.
+          In application, it's necessary to differ nodes between channels.
+          In mono case, it provides with 'NODE_NAME', and
+          in stereo case, it provides 'NODE_NAME' for left and 'NODE_NAME'_r for right.
+
+endif # SND_SOC_TFA986X
+
+endmenu
