@@ -383,4 +383,9 @@ enum tfa98xx_error tfa_get_fw_lib_version(struct tfa_device *tfa,
 enum tfa98xx_error tfa_gain_rampdown(struct tfa_device *tfa, int count);
 enum tfa98xx_error tfa_gain_restore(struct tfa_device *tfa, int count);
 
+#if defined(TFA_PLATFORM_MTK)
+int ipi_tfadsp_write(void *tfa, int length, const char *buf);
+int ipi_tfadsp_read(void *tfa, int length, unsigned char *bytes);
+#endif
+
 #endif /* __TFA_DEVICE_H__ */

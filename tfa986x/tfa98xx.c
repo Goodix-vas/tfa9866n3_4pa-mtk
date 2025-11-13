@@ -32,6 +32,10 @@
 
 #include "inc/tfa98xx_tfafieldnames.h"
 
+#if defined(TFA_PLATFORM_MTK)
+#include <mtk-sp-spk-amp.h>
+#endif
+
 #define TFA98XX_VERSION	TFA98XX_API_REV_STR
 
 #if defined(TFA_PLATFORM_EXYNOS)
@@ -113,9 +117,6 @@ MODULE_PARM_DESC(fw_name, "TFA98xx DSP firmware (container file) name.");
 static int trace_level;
 module_param(trace_level, int, 0444);
 MODULE_PARM_DESC(trace_level, "TFA98xx debug trace level (0=off, b0=verbose,b1=regdmesg,b3=timing).");
-
-static char *dflt_prof_name = "";
-module_param(dflt_prof_name, charp, 0444);
 
 static int no_start;
 module_param(no_start, int, 0444);
@@ -3283,6 +3284,59 @@ int tfa_ext_register(dsp_send_message_t tfa_send_message,
 }
 EXPORT_SYMBOL(tfa_ext_register);
 
+#if defined(TFA_PLATFORM_MTK)
+int ipi_tfadsp_write(void *tfa, int length, const char *buf)
+{
+	enum tfa98xx_error err = TFA98XX_ERROR_OK;
+	int ret = 0;
+
+	if (buf == NULL) {
+		pr_err("%s: error with NULL buffer\n", __func__);
+		return TFA98XX_ERROR_BAD_PARAMETER;
+	}
+
+	if (length >= 3)
+		pr_debug("%s: [0]:0x%02x-[1]:0x%02x-[2]:0x%02x, length:%d\n",
+			__func__, buf[0], buf[1], buf[2], length);
+
+	ret = mtk_spk_send_ipi_buf_to_dsp((void *)buf, (uint32_t)length);
+	if (ret != 0) {
+		pr_err("%s: error in sending message to DSP (err %d)\n",
+			__func__, ret);
+		err = TFA98XX_ERROR_DSP_NOT_RUNNING;
+	}
+
+	return (int)err;
+}
+
+int ipi_tfadsp_read(void *tfa, int length, unsigned char *bytes)
+{
+	enum tfa98xx_error err = TFA98XX_ERROR_OK;
+	int ret = 0;
+	uint32_t buf_len;
+
+	if (bytes == NULL) {
+		pr_err("%s: error with NULL buffer\n", __func__);
+		return TFA98XX_ERROR_BAD_PARAMETER;
+	}
+
+	ret = mtk_spk_recv_ipi_buf_from_dsp((int8_t *)bytes,
+		(int16_t)length, &buf_len);
+	if (ret != 0) {
+		pr_err("%s: error in receiving message to DSP (err %d)\n",
+			__func__, ret);
+		err = TFA98XX_ERROR_DSP_NOT_RUNNING;
+	}
+
+	if (length >= 3)
+		pr_debug("%s: [0]:0x%02x-[1]:0x%02x-[2]:0x%02x, length:%d, buf_len:%d\n",
+			__func__, bytes[0], bytes[1], bytes[2],
+			length, buf_len);
+
+	return (int)err;
+}
+#endif // TFA_PLATFORM_MTK
+
 int tfa_i2c_err_register(tfa_i2c_err_handler_t tfa_i2c_err_handler)
 {
 	if (tfa_i2c_err_handler != NULL)
@@ -3430,10 +3484,17 @@ static void tfa98xx_container_loaded
 	if (tfa98xx->tfa->is_probus_device) {
 		if (!tfa_get_ipc_loaded()) {
 			/* Q_PLATFORM: IPC ON PAL TO COMMUNICATE BETWEEN HAL AND ADSP */
+#if defined(TFA_PLATFORM_MTK)
+			tfa98xx->tfa->dev_ops.dsp_msg
+				= (dsp_send_message_t)ipi_tfadsp_write;
+			tfa98xx->tfa->dev_ops.dsp_msg_read
+				= (dsp_read_message_t)ipi_tfadsp_read;
+#else
 			tfa98xx->tfa->dev_ops.dsp_msg
 				= (dsp_send_message_t)NULL;
 			tfa98xx->tfa->dev_ops.dsp_msg_read
 				= (dsp_read_message_t)NULL;
+#endif
 			tfa_set_ipc_loaded(1);
 		}
 	} else {
@@ -3456,27 +3517,6 @@ static void tfa98xx_container_loaded
 	tfa98xx->profile = 0;
 	tfa98xx->vstep = 0;
 
-	/* Override default profile if requested */
-	if (strcmp(dflt_prof_name, "")) {
-		unsigned int i;
-		int nprof = tfa_cnt_get_dev_nprof(tfa98xx->tfa);
-
-		for (i = 0; i < nprof; i++) {
-			if (strcmp(_tfa_cont_profile_name(tfa98xx, i),
-				dflt_prof_name) == 0) {
-				tfa98xx->profile = i;
-				dev_info(tfa98xx->dev,
-					"changing default profile to %s (%d)\n",
-					dflt_prof_name, tfa98xx->profile);
-				break;
-			}
-		}
-		if (i >= nprof)
-			dev_info(tfa98xx->dev,
-				"Default profile override failed (%s profile not found)\n",
-				dflt_prof_name);
-	}
-
 	tfa98xx->dsp_fw_state = TFA98XX_DSP_FW_OK;
 
 	value = tfa_dev_mtp_get(tfa98xx->tfa, TFA_MTP_RE25);
@@ -3484,7 +3524,7 @@ static void tfa98xx_container_loaded
 		pr_info("[0x%x] error in reading calibration data\n",
 			tfa98xx->i2c->addr);
 	tfa98xx->calibrate_done = (value > 0) ? 1 : 0;
-	pr_info("[0x%x] calibrate_done = EFS (%d) 0x%04x\n",
+	pr_info("[0x%x] calibrate_done = EFS (%d) %d\n",
 		tfa98xx->i2c->addr, tfa98xx->calibrate_done, value);
 
 	pr_debug("Firmware init complete\n");
@@ -3792,6 +3832,7 @@ static void tfa98xx_dsp_init(struct tfa98xx *tfa98xx)
 				tfa98xx->dsp_init
 					= TFA98XX_DSP_INIT_FAIL;
 			tfa98xx_set_dsp_configured(tfa98xx);
+			tfa_set_spkgain(ntfa); // need to setgain for all tfa devices
 			mutex_unlock(&tfa98xx->dsp_lock);
 
 			if (!tfa_is_active_device(ntfa))
@@ -3809,7 +3850,6 @@ static void tfa98xx_dsp_init(struct tfa98xx *tfa98xx)
 			}
 
 			mutex_lock(&tfa98xx->dsp_lock);
-			tfa_set_spkgain(ntfa);
 			pr_info("%s: UNMUTE dev %d\n",
 				__func__, ntfa->dev_idx);
 			tfa_dev_set_state(ntfa,

@@ -23,7 +23,7 @@
 #if !defined(TFA_STEREO_NODE)
 #define TFA_STEREO_NODE
 #endif
-#define TFA_PLATFORM_EXYNOS
+#define TFA_PLATFORM_MTK
 #define TFA_SUPPORT_NEW_DATALOGGER
 
 #endif /* __CONFIG_LINUX_KERNEL_INC__ */
