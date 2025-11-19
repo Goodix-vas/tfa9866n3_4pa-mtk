@@ -215,21 +215,8 @@ struct tfa_device {
 	int inchannel;
 	int ipcid[3];
 	int send_set_logger;
+	int nr_tfadsp;
 };
-
-#define TFA_INCHANNEL(idx) \
-	(((idx % MAX_CHANNELS) == 0) ? INDEX_0 : INDEX_1)
-#if defined(CONFIG_TFA_STEREO_NODE) || defined(TFA_STEREO_NODE)
-/* stereo */
-/* ref. device order in container file */
-/* confirmed by customer on 07/19/2022 v3 */
-#define INDEX_0 0 /* dev 0 - left; top (receiver) */
-#define INDEX_1 1 /* dev 1 - right; bottom (speaker) */
-#else
-/* mono */
-#define INDEX_0 0 /* dev 0 - mono; bottom */
-#define INDEX_1 0 /* dev 0 - mono; bottom */
-#endif /* (CONFIG_TFA_STEREO_NODE) || (TFA_STEREO_NODE) */
 
 /*
  * The tfa_dev_probe is called before accessing any device accessing functions.

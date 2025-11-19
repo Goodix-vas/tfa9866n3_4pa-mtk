@@ -20,8 +20,8 @@
 	pr_err("PrintAssert:%s (%s:%d) error code:%d\n",\
 	__func__, __FILE__, __LINE__, e); }
 
-#if !defined(TFA_STEREO_NODE)
-#define TFA_STEREO_NODE
+#if !defined(TFA_4PA_DEVICE)
+#define TFA_4PA_DEVICE
 #endif
 #define TFA_PLATFORM_MTK
 #define TFA_SUPPORT_NEW_DATALOGGER

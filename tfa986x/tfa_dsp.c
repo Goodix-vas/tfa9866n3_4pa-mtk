@@ -40,7 +40,14 @@ static TFA9866_IRQ_INFO;
  */
 static DEFINE_MUTEX(dev_lock);
 static DEFINE_MUTEX(dsp_msg_lock);
+#if MAX_CHANNELS == 4
+static int dsp_cal_value[MAX_CHANNELS] = {-1, -1, -1, -1};
+#else
 static int dsp_cal_value[MAX_CHANNELS] = {-1, -1};
+#endif
+
+/* dev_idx and tfadsp instance id mapping */
+static uint8_t DEV_TFADSP_IDX[MAX_HANDLES] = {0, };
 
 static enum tfa98xx_error tfa_calibration_range_check(struct tfa_device *tfa,
 	unsigned int channel, int mohm);
@@ -614,9 +621,16 @@ int tfa_get_dev_idx_from_inchannel(int inchannel)
 {
 	struct tfa_device *ntfa;
 	int i;
+#if MAX_CHANNELS == 4
+	static int devset[MAX_CHANNELS] = {
+		TFA_NOT_FOUND, TFA_NOT_FOUND,
+		TFA_NOT_FOUND, TFA_NOT_FOUND
+	};
+#else
 	static int devset[MAX_CHANNELS] = {
 		TFA_NOT_FOUND, TFA_NOT_FOUND
 	};
+#endif
 
 	if (inchannel < 0 || inchannel >= MAX_CHANNELS)
 		return TFA_NOT_FOUND; /* invalid inchannel */
@@ -640,7 +654,7 @@ int tfa_get_dev_idx_from_inchannel(int inchannel)
 	}
 
 	/* if undefined */
-	devset[inchannel] = TFA_INCHANNEL(inchannel);
+	devset[inchannel] = inchannel;
 	return devset[inchannel];
 }
 EXPORT_SYMBOL(tfa_get_dev_idx_from_inchannel);
@@ -4119,6 +4133,7 @@ int tfa_dev_probe(int resp_addr, struct tfa_device *tfa)
 {
 	unsigned short rev, rev1;
 	unsigned int revid = 0;
+	uint8_t tfadsp_id = 0;
 	int rc = 0;
 
 	tfa->resp_address = (unsigned char)resp_addr;
@@ -4175,13 +4190,19 @@ int tfa_dev_probe(int resp_addr, struct tfa_device *tfa)
 	if (tfa->dev_idx < 0)
 		return TFA_ERROR;
 
-	/* device tfadsp of address 0x0 */
-	tfa->dev_tfadsp = tfa_cont_get_idx_tfadsp(tfa, 0);
-	if (tfa->dev_tfadsp != -1) {
-		pr_info("%s: dev %d - found tfadsp device %d\n",
-			__func__, tfa->dev_idx, tfa->dev_tfadsp);
-		tfa->dev_count--;
+	if (tfa->dev_idx < MAX_HANDLES) {
+		tfadsp_id = tfa_cont_get_dev_func(tfa, tfa->resp_address);
+		DEV_TFADSP_IDX[tfa->dev_idx] = tfadsp_id;
 	}
+	/* device tfadsp of address 0x0 */
+	tfa->dev_tfadsp = tfa_cont_get_idx_tfadsp(tfa, tfadsp_id);
+	tfa->nr_tfadsp = tfa_cnt_get_dev_ntfadsp(tfa);
+	if (tfa->dev_tfadsp != -1) {
+		pr_info("%s: dev %d - found tfadsp device %d, nr_tfadsp %d, tfadsp_id %d\n",
+			__func__, tfa->dev_idx, tfa->dev_tfadsp,
+			tfa->nr_tfadsp, tfadsp_id);
+	}
+	tfa->dev_count -= tfa->nr_tfadsp;
 
 	pr_info("%s: dev %d - resp_addr 0x%x\n",
 		__func__, tfa->dev_idx, tfa->resp_address);
@@ -5116,7 +5137,7 @@ enum tfa98xx_error tfa_write_volume(struct tfa_device *tfa, int *sknt)
 {
 	enum tfa98xx_error error = TFA98XX_ERROR_OK;
 	int i, spkr_count = 0;
-	unsigned char bytes[2 * 3] = {0};
+	unsigned char bytes[MAX_CHANNELS * 3] = {0};
 	int data = 0;
 
 	if (tfa_count_status_flag(tfa, TFA_SET_DEVICE) != 0

@@ -48,10 +48,10 @@
 #define TFA_PLATFORM ""
 #endif
 
-#if defined(TFA_STEREO_NODE)
-#define TFA_NODE "STEREO"
+#if defined(TFA_4PA_DEVICE)
+#define TFA_NODE "4PA"
 #else
-#define TFA_NODE "MONO"
+#define TFA_NODE "STEREO"
 #endif
 
 #define I2C_RETRIES 50
@@ -145,7 +145,6 @@ static void tfa98xx_dsp_init(struct tfa98xx *tfa98xx);
 static void tfa98xx_interrupt_enable(struct tfa98xx *tfa98xx, bool enable);
 
 static int get_profile_from_list(char *buf, int id);
-static int get_profile_id_for_sr(int id, unsigned int rate);
 
 static int _tfa98xx_mute(struct tfa98xx *tfa98xx, int mute, int stream);
 static int _tfa98xx_stop(struct tfa98xx *tfa98xx);
@@ -1605,21 +1604,13 @@ static int tfa98xx_get_vstep(struct snd_kcontrol *kcontrol,
 	struct tfa98xx *tfa98xx = snd_soc_component_get_drvdata(component);
 	int mixer_profile = kcontrol->private_value;
 	int ret = 0;
-	int profile;
-
-	profile = get_profile_id_for_sr(mixer_profile, tfa98xx->rate);
-	if (profile < 0) {
-		pr_err("%s: invalid profile %d (mixer_profile=%d, rate=%d)\n",
-			__func__, profile, mixer_profile, tfa98xx->rate);
-		return -EINVAL;
-	}
 
 	mutex_lock(&tfa98xx_mutex);
 	list_for_each_entry(tfa98xx, &tfa98xx_device_list, list) {
-		int vstep = tfa98xx->prof_vsteps[profile];
+		int vstep = tfa98xx->prof_vsteps[mixer_profile];
 
 		ucontrol->value.integer.value[tfa98xx->tfa->dev_idx]
-			= tfa_cont_get_max_vstep(tfa98xx->tfa, profile)
+			= tfa_cont_get_max_vstep(tfa98xx->tfa, mixer_profile)
 			- vstep - 1;
 	}
 	mutex_unlock(&tfa98xx_mutex);
@@ -1634,17 +1625,14 @@ static int tfa98xx_set_vstep(struct snd_kcontrol *kcontrol,
 		= snd_soc_kcontrol_component(kcontrol);
 	struct tfa98xx *tfa98xx = snd_soc_component_get_drvdata(component);
 	int mixer_profile = kcontrol->private_value;
-	int profile;
 	int err = 0;
 	int change = 0;
 
 	if (no_start != 0)
 		return 0;
 
-	profile = get_profile_id_for_sr(mixer_profile, tfa98xx->rate);
-	if (profile < 0) {
-		pr_err("%s: invalid profile %d (mixer_profile=%d, rate=%d)\n",
-			__func__, profile, mixer_profile, tfa98xx->rate);
+	if (mixer_profile < 0) {
+		pr_err("%s: invalid profile %d\n",	__func__, mixer_profile);
 		return -EINVAL;
 	}
 
@@ -1664,8 +1652,8 @@ static int tfa98xx_set_vstep(struct snd_kcontrol *kcontrol,
 		int value = ucontrol->value
 			.integer.value[tfa98xx->tfa->dev_idx];
 
-		vstep = tfa98xx->prof_vsteps[profile];
-		vsteps = tfa_cont_get_max_vstep(tfa98xx->tfa, profile);
+		vstep = tfa98xx->prof_vsteps[mixer_profile];
+		vsteps = tfa_cont_get_max_vstep(tfa98xx->tfa, mixer_profile);
 
 		if (vstep == vsteps - value - 1)
 			continue;
@@ -1675,9 +1663,9 @@ static int tfa98xx_set_vstep(struct snd_kcontrol *kcontrol,
 		if (new_vstep < 0)
 			new_vstep = 0;
 
-		tfa98xx->prof_vsteps[profile] = new_vstep;
+		tfa98xx->prof_vsteps[mixer_profile] = new_vstep;
 
-		if (profile == tfa98xx->profile) {
+		if (mixer_profile == tfa98xx->profile) {
 			/* this is the active profile, program the new vstep */
 			tfa98xx->vstep = new_vstep;
 			mutex_lock(&tfa98xx->dsp_lock);
@@ -1703,7 +1691,7 @@ static int tfa98xx_set_vstep(struct snd_kcontrol *kcontrol,
 			mutex_unlock(&tfa98xx->dsp_lock);
 		}
 		pr_debug("%d: vstep:%d, (control value: %d) - profile %d\n",
-			tfa98xx->tfa->dev_idx, new_vstep, value, profile);
+			tfa98xx->tfa->dev_idx, new_vstep, value, mixer_profile);
 	}
 
 	if (!change) {
@@ -1732,11 +1720,9 @@ static int tfa98xx_info_vstep(struct snd_kcontrol *kcontrol,
 		= snd_soc_kcontrol_component(kcontrol);
 	struct tfa98xx *tfa98xx = snd_soc_component_get_drvdata(component);
 	int mixer_profile = tfa98xx_mixer_profile;
-	int profile = get_profile_id_for_sr(mixer_profile, tfa98xx->rate);
 
-	if (profile < 0) {
-		pr_err("%s: invalid profile %d (mixer_profile=%d, rate=%d)\n",
-			__func__, profile, mixer_profile, tfa98xx->rate);
+	if (mixer_profile < 0) {
+		pr_err("%s: invalid profile %d\n", __func__, mixer_profile);
 		return -EINVAL;
 	}
 
@@ -1746,10 +1732,10 @@ static int tfa98xx_info_vstep(struct snd_kcontrol *kcontrol,
 	mutex_unlock(&tfa98xx_mutex);
 	uinfo->value.integer.min = 0;
 	uinfo->value.integer.max
-		= max(0, tfa_cont_get_max_vstep(tfa98xx->tfa, profile) - 1);
+		= max(0, tfa_cont_get_max_vstep(tfa98xx->tfa, mixer_profile) - 1);
 	pr_debug("vsteps count: %d [prof=%d]\n",
-		tfa_cont_get_max_vstep(tfa98xx->tfa, profile),
-		profile);
+		tfa_cont_get_max_vstep(tfa98xx->tfa, mixer_profile),
+		mixer_profile);
 	return 0;
 }
 
@@ -1772,35 +1758,28 @@ static int tfa98xx_set_profile(struct snd_kcontrol *kcontrol,
 	int err = 0;
 	int change = 0;
 	int new_profile;
-	int prof_idx, cur_prof_idx;
 	int profile_count = tfa98xx_mixer_profiles;
-	int profile = tfa98xx_mixer_profile;
 
 	if (no_start != 0)
 		return 0;
 
 	new_profile = ucontrol->value.integer.value[0];
-	if (new_profile == profile)
+	if (new_profile == tfa98xx_mixer_profile) {
+		pr_info("%s: new_profile=tfa98xx_mixer_profile [%d]\n",
+			__func__, new_profile);
 		return 0;
+	}
 
 	if ((new_profile < 0) || (new_profile >= profile_count)) {
 		pr_err("not existing profile (%d)\n", new_profile);
 		return -EINVAL;
 	}
 
-	/* get the container profile for the requested sample rate */
-	prof_idx = get_profile_id_for_sr(new_profile, tfa98xx->rate);
-	cur_prof_idx = get_profile_id_for_sr(profile, tfa98xx->rate);
-	if (prof_idx < 0 || cur_prof_idx < 0) {
-		pr_err("%s: sample rate [%d] not supported for this mixer profile [%d -> %d]\n",
-			__func__, tfa98xx->rate, profile, new_profile);
-		return 0;
-	}
 	pr_info("%s: selected container profile [%d -> %d]\n",
-		__func__, cur_prof_idx, prof_idx);
+		__func__, tfa98xx_mixer_profile, new_profile);
 	pr_debug("%s: switch profile [%s -> %s]\n", __func__,
-		_tfa_cont_profile_name(tfa98xx, cur_prof_idx),
-		_tfa_cont_profile_name(tfa98xx, prof_idx));
+		_tfa_cont_profile_name(tfa98xx, tfa98xx_mixer_profile),
+		_tfa_cont_profile_name(tfa98xx, new_profile));
 
 	/* update mixer profile */
 	tfa98xx_mixer_profile = new_profile;
@@ -1818,8 +1797,8 @@ static int tfa98xx_set_profile(struct snd_kcontrol *kcontrol,
 		int ready = 0;
 
 		/* update 'real' profile (container profile) */
-		tfa98xx->profile = prof_idx;
-		tfa98xx->vstep = tfa98xx->prof_vsteps[prof_idx];
+		tfa98xx->profile = new_profile;
+		tfa98xx->vstep = tfa98xx->prof_vsteps[new_profile];
 
 		mutex_lock(&tfa98xx->dsp_lock);
 		/* Set ready by force, for selective channel control */
@@ -1827,14 +1806,14 @@ static int tfa98xx_set_profile(struct snd_kcontrol *kcontrol,
 		if (ready) {
 			/* Also re-enables the interrupts */
 			pr_info("%s: trigger [dev %d - prof %d]\n", __func__,
-				tfa98xx->tfa->dev_idx, prof_idx);
+				tfa98xx->tfa->dev_idx, new_profile);
 			err = tfa98xx_tfa_start(tfa98xx,
-				prof_idx, tfa98xx->vstep);
+				new_profile, tfa98xx->vstep);
 			if (err) {
 				pr_info("Write profile error: %d\n", err);
 			} else {
 				pr_debug("Changed to profile %d (vstep = %d)\n",
-					prof_idx, tfa98xx->vstep);
+					new_profile, tfa98xx->vstep);
 				change = 1;
 			}
 		}
@@ -1930,32 +1909,6 @@ static int tfa98xx_get_fsidx(unsigned int rate)
 			return i;
 
 	return -EINVAL;
-}
-
-/*
- * for the profile with id, look if the requested samplerate is
- * supported, if found return the (container)profile for this
- * samplerate, on error or if not found return -1
- */
-static int get_profile_id_for_sr(int id, unsigned int rate)
-{
-	int idx = 0;
-	struct tfa98xx_baseprofile *bprof;
-
-	list_for_each_entry(bprof, &profile_list, list) {
-		if (id == bprof->item_id) {
-			idx = tfa98xx_get_fsidx(rate);
-			if (idx < 0) {
-				/* samplerate not supported */
-				return TFA_ERROR;
-			}
-
-			return bprof->sr_rate_sup[idx];
-		}
-	}
-
-	/* profile not found */
-	return TFA_ERROR;
 }
 
 /* check if this profile is a calibration profile */
@@ -4013,8 +3966,8 @@ static int tfa98xx_startup(struct snd_pcm_substream *substream,
 	tfa98xx->rate_constraint.list = &tfa98xx->rate_constraint_list[0];
 	tfa98xx->rate_constraint.count = 0;
 
-	pr_info("%s: add all the supported rates: 0x%04x\n",
-		__func__, TFA98XX_RATES);
+	pr_info("%s: dev[%d] add all the supported rates: 0x%04x\n",
+		__func__, tfa98xx->tfa->dev_idx, TFA98XX_RATES);
 	for (i = 0; i < (int)ARRAY_SIZE(index_to_rate); i++) {
 		if ((1 << i) & TFA98XX_RATES) {
 			tfa98xx->rate_constraint_list[idx++] = index_to_rate[i];
@@ -4035,6 +3988,7 @@ static int tfa98xx_set_dai_sysclk(struct snd_soc_dai *codec_dai,
 	struct tfa98xx *tfa98xx
 		= snd_soc_component_get_drvdata(codec_dai->component);
 
+	pr_info("%s: clk_id=%d, freq=%d, dir=%d\n", __func__, clk_id, freq, dir);
 	if (tfa98xx == NULL)
 		return 0;
 
@@ -4045,7 +3999,9 @@ static int tfa98xx_set_dai_sysclk(struct snd_soc_dai *codec_dai,
 static int tfa98xx_set_tdm_slot(struct snd_soc_dai *dai, unsigned int tx_mask,
 	unsigned int rx_mask, int slots, int slot_width)
 {
-	pr_debug("\n");
+	pr_info("%s: tx_mask=%d, rx_mask=%d, slots=%d, slot_width=%d\n", 
+		__func__, tx_mask, rx_mask, slots, slot_width);
+
 	return 0;
 }
 
@@ -4094,7 +4050,6 @@ static int tfa98xx_hw_params(struct snd_pcm_substream *substream,
 	struct tfa98xx *tfa98xx
 		= snd_soc_component_get_drvdata(component);
 	unsigned int rate;
-	int prof_idx;
 	int sample_size;
 	int slot_size;
 
@@ -4110,23 +4065,11 @@ static int tfa98xx_hw_params(struct snd_pcm_substream *substream,
 	if (tfa98xx == NULL || tfa98xx->tfa == NULL)
 		return 0;
 
-	pr_info("%s: forced to change rate: %d to %d\n",
-		__func__, rate, sr_converted);
-	rate = sr_converted;
-
-	/* check if samplerate is supported for this mixer profile */
-	prof_idx = get_profile_id_for_sr(tfa98xx_mixer_profile, rate);
-	if (prof_idx < 0) {
-		pr_err("tfa98xx: invalid sample rate %d.\n", rate);
-		return -EINVAL;
-	}
-	pr_debug("mixer profile:container profile = [%d:%d]\n",
-		tfa98xx_mixer_profile, prof_idx);
-
 	/* update 'real' profile (container profile) */
-	tfa98xx->profile = prof_idx;
+	tfa98xx->profile = tfa98xx_mixer_profile;
 
-	pr_info("%s: tfa98xx_profile %d\n", __func__, tfa98xx->profile);
+	pr_info("%s: dev[%d] tfa98xx_profile %d\n", __func__,
+		tfa98xx->tfa->dev_idx, tfa98xx->profile);
 
 	/* update to new rate */
 	tfa98xx->rate = rate;
@@ -4178,8 +4121,8 @@ static int _tfa98xx_mute(struct tfa98xx *tfa98xx, int mute, int stream)
 		}
 
 		mutex_lock(&tfa98xx->dsp_lock);
-		pr_info("mute:%d [pstream %d, cstream %d]\n",
-			mute, tfa98xx->pstream, tfa98xx->cstream);
+		pr_info("mute:%d dev[%d] stream %d [pstream %d, cstream %d]\n", mute,
+			tfa98xx->tfa->dev_idx, stream, tfa98xx->pstream, tfa98xx->cstream);
 
 		if ((tfa98xx_count_active_stream(BIT_PSTREAM)
 			== tfa98xx_device_count)
@@ -4243,8 +4186,8 @@ static int _tfa98xx_mute(struct tfa98xx *tfa98xx, int mute, int stream)
 		else if (stream == SNDRV_PCM_STREAM_CAPTURE)
 			tfa98xx->cstream = 1;
 		mutex_lock(&tfa98xx->dsp_lock);
-		pr_info("mute:%d [pstream %d, cstream %d]\n",
-			mute, tfa98xx->pstream, tfa98xx->cstream);
+		pr_info("mute:%d dev[%d] stream %d [pstream %d, cstream %d]\n", mute,
+			tfa98xx->tfa->dev_idx, stream, tfa98xx->pstream, tfa98xx->cstream);
 		tfa98xx_set_stream_state(tfa98xx->tfa,
 			(tfa98xx->pstream & BIT_PSTREAM)
 			|((tfa98xx->cstream<<1) & BIT_CSTREAM));
@@ -4564,18 +4507,17 @@ static int tfa98xx_parse_inchannel_dt(struct device *dev,
 	if (tfa98xx->tfa == NULL) /* device not ready */
 		return TFA_NOT_FOUND;
 
+	tfa98xx->tfa->inchannel = tfa98xx->tfa->dev_idx;
 	err = of_property_read_u32(np, "inchannel", &value);
 	if (err < 0) {
-		tfa98xx->tfa->inchannel /* to use default INDEX_0/1 */
-			= TFA_INCHANNEL(tfa98xx->tfa->dev_idx);
+		pr_info("Not found. [0x%x] inchannel : %d\n",
+			tfa98xx->i2c->addr, tfa98xx->tfa->inchannel);
 		return TFA_NOT_FOUND;
 	}
 
-	if ((int)value < 0 || value >= MAX_CHANNELS)
-		tfa98xx->tfa->inchannel /* to use default INDEX_0/1 */
-			= TFA_INCHANNEL(tfa98xx->tfa->dev_idx);
-	else
+	if (value >= 0 && value < MAX_CHANNELS)
 		tfa98xx->tfa->inchannel = value;
+
 	pr_info("[0x%x] inchannel : %d\n",
 		tfa98xx->i2c->addr, tfa98xx->tfa->inchannel);
 
@@ -5835,10 +5777,6 @@ int tfa98xx_update_spkt_data(int idx)
 		return DEFAULT_REF_TEMP;
 
 	ndev = tfa->dev_count;
-#if !defined(TFA_STEREO_NODE)
-	if (ndev == 1 && idx > 0)
-		idx = 0; /* use device 0 in mono, by force */
-#endif
 	if ((ndev < 1)
 		|| (idx < 0 || idx >= ndev))
 		return DEFAULT_REF_TEMP;
@@ -5950,10 +5888,6 @@ int tfa98xx_write_sknt_control(int idx, int value)
 		return -ENODEV;
 
 	ndev = tfa->dev_count;
-#if !defined(TFA_STEREO_NODE)
-	if (ndev == 1 && idx > 0)
-		idx = 0; /* use device 0 in mono, by force */
-#endif
 	if ((ndev < 1)
 		|| (idx < 0 || idx >= ndev))
 		return -EINVAL;

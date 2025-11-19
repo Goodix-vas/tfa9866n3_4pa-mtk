@@ -22,7 +22,7 @@
 
 /* 2 channels per SB */
 #define MAX_HANDLES 4
-#define MAX_CHANNELS 2
+#define MAX_CHANNELS 4
 
 /* max. length of a alsa mixer control name */
 #define MAX_CONTROL_NAME 48

@@ -80,7 +80,21 @@ int tfa_cont_get_idx(struct tfa_device *tfa);
  * @param value the address of device tfadsp
  * @return the device index
  */
-int tfa_cont_get_idx_tfadsp(struct tfa_device *tfa, int value);
+int tfa_cont_get_idx_tfadsp(struct tfa_device *tfa, int tfadsp_idx);
+
+/*
+* Get the func of a device
+* @param tfa the device struct pointer
+* @return the func(tfadsp instance id) of device
+*/
+uint8_t tfa_cont_get_dev_func(struct tfa_device* tfa, uint8_t i2c_addr);
+
+/*
+ * Get the number of tfadsp device (address 0).
+ * @param tfa the device struct pointer
+ * @return the number of tfadsp device
+ */
+int tfa_cnt_get_dev_ntfadsp(struct tfa_device* tfa);
 
 /*
  * Write reg and bitfield items in the devicelist to the target.

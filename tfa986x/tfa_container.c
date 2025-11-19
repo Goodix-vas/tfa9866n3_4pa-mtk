@@ -24,6 +24,9 @@ static void tfa_overwrite_temp(struct tfa_device *tfa, char *data_buf);
 /* module globals */
 static uint8_t gresp_address; /* in case of setting with option */
 
+/* number of tfadsp device in CNT */
+static int tfadsp_dev_nr = 0;
+
 /*
  * check the container file
  */
@@ -68,6 +71,7 @@ enum tfa_error tfa_load_cnt(void *cnt, int length)
 			cntbuf->subversion[0], cntbuf->subversion[1]);
 		return tfa_error_container;
 	}
+	tfadsp_dev_nr = 0;
 
 	return tfa_error_ok;
 }
@@ -396,8 +400,8 @@ enum tfa98xx_error tfa_cont_write_file(struct tfa_device *tfa,
 	if (tfa_cont_is_config_loaded(tfa))
 		return err;
 
-	if (tfa->verbose)
-		tfa_cont_show_header(hdr);
+	//if (tfa->verbose)
+	//	tfa_cont_show_header(hdr);
 
 	type = (enum tfa_header_type)hdr->id;
 	if ((type == msg_hdr)
@@ -658,7 +662,7 @@ int tfa_cont_get_idx(struct tfa_device *tfa)
 	return i;
 }
 
-int tfa_cont_get_idx_tfadsp(struct tfa_device *tfa, int value)
+int tfa_cont_get_idx_tfadsp(struct tfa_device *tfa, int tfadsp_idx)
 {
 	struct tfa_device_list *dev = NULL;
 	int i;
@@ -670,11 +674,55 @@ int tfa_cont_get_idx_tfadsp(struct tfa_device *tfa, int value)
 		dev = tfa_cont_device(tfa->cnt, i);
 		if (!dev)
 			continue;
-		if (dev->dev == value)
+		if (dev->dev == 0x00 && dev->func == tfadsp_idx)
 			return i;
 	}
 
 	return TFA_NOT_FOUND;
+}
+
+/* return func in a device matched i2c address
+   func = tfadsp instance id
+ */
+uint8_t tfa_cont_get_dev_func(struct tfa_device* tfa, uint8_t i2c_addr)
+{
+	struct tfa_device_list* dev = NULL;
+	int i;
+
+	if (tfa == NULL || tfa->cnt == NULL)
+		return 0;
+
+	for (i = 0; i < tfa->cnt->ndev; i++) {
+		dev = tfa_cont_device(tfa->cnt, i);
+		if (!dev)
+			continue;
+		if (dev->dev == i2c_addr)
+			return dev->func;
+	}
+	return 0;
+}
+
+/* return number of tfadsp device */
+int tfa_cnt_get_dev_ntfadsp(struct tfa_device* tfa)
+{
+	int count = 0, i = 0;
+	struct tfa_device_list* dev = NULL;
+
+	if (tfadsp_dev_nr > 0)
+		count = tfadsp_dev_nr;
+	else {
+		if (tfa == NULL || tfa->cnt == NULL)
+			return 0;
+		for (i = 0; i < tfa->cnt->ndev; i++) {
+			dev = tfa_cont_device(tfa->cnt, i);
+			if (!dev)
+				continue;
+			if (dev->dev == 0x00)
+				count++;
+		}
+		tfadsp_dev_nr = count;
+	}
+	return count;
 }
 
 /*
@@ -879,6 +927,8 @@ enum tfa98xx_error tfa_cont_write_files(struct tfa_device *tfa)
 	if (tfa == NULL)
 		return TFA98XX_ERROR_BAD_PARAMETER;
 
+	pr_info("%s: nr_tfadsp device %d\n", __func__, tfa->nr_tfadsp);
+
 	dev_idx_files = (tfa->dev_tfadsp == -1)
 		? tfa->dev_idx : tfa->dev_tfadsp;
 	dev = tfa_cont_device(tfa->cnt, dev_idx_files);
@@ -996,8 +1046,8 @@ enum tfa98xx_error tfa_cont_write_files_prof(struct tfa_device *tfa,
 			file = (struct tfa_file_dsc *)
 				(prof->list[i].offset + (uint8_t *)tfa->cnt);
 			patchfile = (struct tfa_patch_file *)&file->data;
-			if (tfa->verbose)
-				tfa_cont_show_header(&patchfile->hdr);
+			//if (tfa->verbose)
+			//	tfa_cont_show_header(&patchfile->hdr);
 
 			/* size is total length */
 			size = patchfile->hdr.size
