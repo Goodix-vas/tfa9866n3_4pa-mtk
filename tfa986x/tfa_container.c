@@ -166,6 +166,31 @@ int tfa_cnt_get_dev_nprof(struct tfa_device *tfa)
 }
 
 /*
+ * get the number of profiles for the dev_idx device
+ */
+int tfa_cnt_get_nprof_from_dev_idx(struct tfa_device* tfa, int dev_idx)
+{
+	struct tfa_device_list* dev;
+	int idx, nprof = 0;
+
+	if (tfa == NULL || tfa->cnt == NULL)
+		return 0;
+
+	if ((dev_idx < 0) || (dev_idx >= tfa->cnt->ndev))
+		return 0;
+
+	dev = tfa_cont_get_dev_list(tfa->cnt, dev_idx);
+	if (dev) {
+		for (idx = 0; idx < dev->length; idx++) {
+			if (dev->list[idx].type == dsc_profile)
+				nprof++;
+		}
+	}
+
+	return nprof;
+}
+
+/*
  * get the Nth lifedata for the Nth device
  */
 struct tfa_livedata_list *
@@ -327,10 +352,8 @@ static int tfa_cont_is_config_loaded(struct tfa_device *tfa)
 	/* check if config is loaded at the first device:
 	 * to write files only once
 	 */
-
-	if (tfa_count_status_flag(tfa, TFA_SET_DEVICE) > 1
-		|| tfa_count_status_flag(tfa, TFA_SET_CONFIG) > 0) {
-		pr_debug("%s: skip secondary device (%d)\n",
+	if (tfa_count_status_flag(tfa, TFA_SET_CONFIG) > 1) {
+		pr_debug("%s: tfadsp is already configured (%d)\n",
 			__func__, tfa->dev_idx);
 		return 1;
 	}
@@ -390,12 +413,14 @@ enum tfa98xx_error tfa_cont_write_file(struct tfa_device *tfa,
 	struct tfa_header *hdr = (struct tfa_header *)file->data;
 	enum tfa_header_type type;
 	int size;
-	char sub_ver_string[8] = {0};
+	char* data_buf;
+	/* not necessary code */
+	/*
+	char sub_ver_string[8] = { 0 };
 	uint16_t subversion = 0;
 	int kerr;
-	char *data_buf;
-	struct tfa_device *ntfa;
-	int i;
+	struct tfa_device* ntfa;
+	int i; */
 
 	if (tfa_cont_is_config_loaded(tfa))
 		return err;
@@ -404,6 +429,7 @@ enum tfa98xx_error tfa_cont_write_file(struct tfa_device *tfa,
 	//	tfa_cont_show_header(hdr);
 
 	type = (enum tfa_header_type)hdr->id;
+	/* // not necessary code
 	if ((type == msg_hdr)
 		|| ((type == volstep_hdr) && (tfa->tfa_family == 2))) {
 		sub_ver_string[0] = hdr->subversion[0];
@@ -455,7 +481,7 @@ enum tfa98xx_error tfa_cont_write_file(struct tfa_device *tfa,
 					tfa->fw_itf_ver[3]);
 			}
 		}
-	}
+	} */
 
 	switch (type) {
 	case msg_hdr: /* generic DSP message */
@@ -684,7 +710,7 @@ int tfa_cont_get_idx_tfadsp(struct tfa_device *tfa, int tfadsp_idx)
 /* return func in a device matched i2c address
    func = tfadsp instance id
  */
-uint8_t tfa_cont_get_dev_func(struct tfa_device* tfa, uint8_t i2c_addr)
+int tfa_cont_get_dev_func(struct tfa_device* tfa, uint8_t i2c_addr)
 {
 	struct tfa_device_list* dev = NULL;
 	int i;
@@ -927,10 +953,10 @@ enum tfa98xx_error tfa_cont_write_files(struct tfa_device *tfa)
 	if (tfa == NULL)
 		return TFA98XX_ERROR_BAD_PARAMETER;
 
-	pr_info("%s: nr_tfadsp device %d\n", __func__, tfa->nr_tfadsp);
-
 	dev_idx_files = (tfa->dev_tfadsp == -1)
 		? tfa->dev_idx : tfa->dev_tfadsp;
+	pr_info("%s: dev_idx_files %d, tfadsp_handle %d\n", 
+		__func__, dev_idx_files, tfa->tfadsp_handle);
 	dev = tfa_cont_device(tfa->cnt, dev_idx_files);
 
 	if (!dev)
@@ -1027,6 +1053,8 @@ enum tfa98xx_error tfa_cont_write_files_prof(struct tfa_device *tfa,
 
 	dev_idx_files = (tfa->dev_tfadsp == -1)
 		? tfa->dev_idx : tfa->dev_tfadsp;
+	pr_info("%s: dev_idx_files %d, tfadsp_handle %d\n", 
+		__func__, dev_idx_files, tfa->tfadsp_handle);
 	prof = tfa_cont_get_dev_prof_list(tfa->cnt,
 		dev_idx_files, prof_idx);
 
@@ -1630,6 +1658,32 @@ enum tfa98xx_error tfa_cont_write_profile(struct tfa_device *tfa,
 		goto tfa_cont_write_profile_error_exit;
 	}
 
+#if defined(TFA_DSP_MSG_OPTIMIZATION)
+	tfa->is_bypass = 1; /* reset before start */
+
+	if (tfa->is_probus_device) {
+		struct tfa_device* tfa0;
+
+		tfa0 = tfa98xx_get_tfa_device_from_index(-1);
+		if (tfa0 != NULL) {
+			int tfadsp_id = tfa->func;
+			struct tfa98xx_buffer_pool* buf_pool;
+			buf_pool = &(tfa0->dsp_msg_pool[tfadsp_id][prof_idx]);
+			pr_info("%s: tfadsp_id %d, profile %d, pool size %d\n",
+				__func__, tfadsp_id, prof_idx, buf_pool->size);
+			if (buf_pool->pool != NULL && buf_pool->size > 0)
+				tfa->is_bypass = 0;
+		}
+	}
+	tfa_dev_set_swprof(tfa, (unsigned short)prof_idx);
+
+	/* put SetRe25C message to indicate all messages are sent */
+	if (tfa->ext_dsp == 1)
+		err = tfa_set_calibration_values_once(tfa);
+
+	return err;
+#endif
+
 	/* Write files from previous profile (default section)
 	 * Should only be used for the patch & trap patch (file)
 	 */
@@ -2134,6 +2188,18 @@ int tfa_tib_dsp_msgmulti(struct tfa_device *tfa,
 			__func__, idx);
 
 		/* add total - specially merged fom legacy */
+#if defined(TFA_2SB_INSTANCE)
+		if (tfa->convert_dsp32) {
+			if (total_len <= 0xffff) {
+				blob[idx][6] = (uint8_t)
+					((total_len >> 8) & 0xff);
+				blob[idx][7] = (uint8_t)(total_len & 0xff);
+			}
+		} else {
+			if (total_len <= 0xff)
+				blob[idx][3] = (uint8_t)(total_len & 0xff);
+		}
+#else
 		if (tfa->convert_dsp32) {
 			if (total_len <= 0xffff) {
 				blob[idx][2] = (uint8_t)
@@ -2144,6 +2210,7 @@ int tfa_tib_dsp_msgmulti(struct tfa_device *tfa,
 			if (total_len <= 0xff)
 				blob[idx][0] = (uint8_t)(total_len & 0xff);
 		}
+#endif
 		/* set last length field to zero */
 		for (i = total_len;
 			i < (total_len + len_word_in_bytes); i++)
@@ -2205,18 +2272,44 @@ int tfa_tib_dsp_msgmulti(struct tfa_device *tfa,
 			tfa98xx_buffer_pool_access
 				(blob_p_index[idx], 0, &blob[idx], POOL_RETURN);
 		blob_p_index[idx] = tfa98xx_buffer_pool_access
-			(-1, 64 * 1024, &blob[idx], POOL_GET);
+			(-1, 16 * 1024, &blob[idx], POOL_GET);
 		if (blob_p_index[idx] != -1) {
 			pr_debug("%s: allocated from buffer_pool[%d]\n",
 				__func__, blob_p_index[idx]);
 		} else {
-			blob[idx] = kmalloc(64 * 1024, GFP_KERNEL);
+			blob[idx] = kmalloc(16 * 1024, GFP_KERNEL);
 			/* max length is 64k */
 			if (blob[idx] == NULL) {
 				return TFA_ERROR;
 			}
 		}
 
+#if defined(TFA_2SB_INSTANCE)
+		if (tfa->convert_dsp32) {
+			blob[idx][0] = tfa->func;
+			blob[idx][1] = 0x0;
+			blob[idx][2] = 0x0;
+			blob[idx][3] = 0x0;
+			/* add command ID for multi-msg = 0x008015 */
+			blob[idx][4] = FW_PAR_ID_SET_MULTI_MESSAGE;
+			blob[idx][5] = 0x80 | MODULE_FRAMEWORK;
+			blob[idx][6] = 0x0;
+			blob[idx][7] = 0x0;
+			pr_debug("%s: multi-msg(tfadsp%d) (index %d) [0]=0x%x-[1]=0x%x-[2]=0x%x\n",
+				__func__, tfa->tfadsp_handle, idx,
+				blob[idx][4], blob[idx][5], blob[idx][6]);
+		} else {
+			blob[idx][0] = 0x0;
+			blob[idx][1] = 0x0;
+			blob[idx][2] = tfa->func;
+			blob[idx][3] = 0x0;
+			blob[idx][4] = 0x80 | MODULE_FRAMEWORK;
+			blob[idx][5] = FW_PAR_ID_SET_MULTI_MESSAGE;
+		}
+		blobptr[idx] = blob[idx];
+		blobptr[idx] += (len_word_in_bytes * 2);
+		total[idx] = (len_word_in_bytes * 2);
+#else
 		/* add command ID for multi-msg = 0x008015 */
 		if (tfa->convert_dsp32) {
 			blob[idx][0] = FW_PAR_ID_SET_MULTI_MESSAGE;
@@ -2228,13 +2321,13 @@ int tfa_tib_dsp_msgmulti(struct tfa_device *tfa,
 			blob[idx][1] = 0x80 | MODULE_FRAMEWORK;
 			blob[idx][2] = FW_PAR_ID_SET_MULTI_MESSAGE;
 		}
-		pr_debug("%s: multi-msg (index %d) [0]=0x%x-[1]=0x%x-[2]=0x%x\n",
-			__func__, idx,
+		pr_debug("%s: multi-msg(tfadsp%d) (index %d) [0]=0x%x-[1]=0x%x-[2]=0x%x\n",
+			__func__, tfa->tfadsp_handle, idx,
 			blob[idx][0], blob[idx][1], blob[idx][2]);
-
 		blobptr[idx] = blob[idx];
 		blobptr[idx] += len_word_in_bytes;
 		total[idx] = len_word_in_bytes;
+#endif
 	}
 
 	/* check total message size after concatination */
@@ -2304,4 +2397,136 @@ int tfa_tib_dsp_msgmulti(struct tfa_device *tfa,
 
 	return 0;
 }
+
+#if defined(TFA_DSP_MSG_OPTIMIZATION)
+static int mm_length = 0; /* byte length */
+static int mm_ptr_idx = 0; /* word index */
+
+static void dsp_msg_store(int length24, uint8_t *buf24, int *mm_buf)
+{
+	int length32 = (length24 / 3) * 4;
+	uint8_t *mm_buf8 = (uint8_t *)(mm_buf + mm_ptr_idx);
+	
+	mm_buf8[0] = (uint8_t)((length32 / 4) & 0xff);
+	mm_buf8[1] = (uint8_t)(((length32 / 4) & 0xff00) >> 8);
+	mm_buf8[2] = 0x0;
+	mm_buf8[3] = 0x0;
+	mm_ptr_idx++;
+
+	for (int i = 0; i < length24; i += 3) {
+		int tmp = (buf24[i] << 16)
+			+ (buf24[i + 1] << 8) + buf24[i + 2];
+
+		/* Sign extend to 32-bit from 24-bit */
+		mm_buf[mm_ptr_idx++] = ((int32_t)tmp << 8) >> 8;
+	}
+	mm_length += (length32 + 4);
+}
+
+int tfa_cont_write_dsp_msg(struct tfa_container *cnt, int dev_tfadsp, int prof_idx, int *mm_buf)
+{
+	struct tfa_device_list *dev = NULL;
+	struct tfa_profile_list *prof = NULL;
+	struct tfa_file_dsc *file;
+	struct tfa_header *hdr;
+	enum tfa_header_type type;
+	char *pcmd = NULL;
+	/* every word requires 3 bytes, and 3 is the msg */
+	int i, size = 0, is_bypass = 1;
+	uint8_t re25c_buf[9] = {0};
+	uint8_t *mm_buf8 = (uint8_t *)mm_buf;
+
+	dev = tfa_cont_device(cnt, dev_tfadsp);
+
+	mm_ptr_idx = 0; /* int size index */
+	mm_length = 0; /* byte length */
+
+	/* add mm header */
+#if defined(TFA_2SB_INSTANCE)
+	mm_buf8[0] = dev->func;
+	mm_buf8[1] = 0x0;
+	mm_buf8[2] = 0x0;
+	mm_buf8[3] = 0x0;
+	/* add command ID for multi-msg = 0x008015 */
+	mm_buf8[4] = FW_PAR_ID_SET_MULTI_MESSAGE;
+	mm_buf8[5] = 0x80 | MODULE_FRAMEWORK;
+	mm_buf8[6] = 0x0;
+	mm_buf8[7] = 0x0;
+	mm_ptr_idx += 2; /* int size index */
+	mm_length += 8; /* byte length */
+#else
+	mm_buf8[0] = FW_PAR_ID_SET_MULTI_MESSAGE;
+	mm_buf8[1] = 0x80 | MODULE_FRAMEWORK;
+	mm_buf8[2] = 0x0;
+	mm_buf8[3] = 0x0;
+	mm_ptr_idx += 1; /* int size index */
+	mm_length += 4; /* byte length */
+#endif
+
+	/* process the list and write all files */
+	for (i = 0; i < dev->length; i++) {
+		if (dev->list[i].type == dsc_file) {
+			file = (struct tfa_file_dsc *)
+				(dev->list[i].offset + (uint8_t *)cnt);
+			hdr = (struct tfa_header *)file->data;
+			type = (enum tfa_header_type)hdr->id;
+			if (type == msg_hdr) {
+				size = hdr->size - sizeof(struct tfa_msg_file);
+				if (size > 0)
+					is_bypass = 0;
+				dsp_msg_store(size,
+					(uint8_t *)((struct tfa_msg_file *)hdr)->data, mm_buf);
+			}
+		} else if (dev->list[i].type == dsc_cmd) {
+			pcmd = dev->list[i].offset + (char *)cnt;
+			size = *(uint16_t *)pcmd;
+			dsp_msg_store(size, (uint8_t *)pcmd + 2, mm_buf);
+		}
+	}
+	
+	prof = tfa_cont_get_dev_prof_list(cnt, dev_tfadsp, prof_idx);
+
+	/* process the list and write all files */
+	for (i = 0; i < prof->length; i++) {
+		if (prof->list[i].type == dsc_file) {
+			file = (struct tfa_file_dsc *)
+				(prof->list[i].offset + (uint8_t *)cnt);
+			hdr = (struct tfa_header *)file->data;
+			type = (enum tfa_header_type)hdr->id;
+			if (type == msg_hdr) {
+				size = hdr->size - sizeof(struct tfa_msg_file);
+				if (size > 0)
+					is_bypass = 0;
+				dsp_msg_store(size,
+					(uint8_t *)((struct tfa_msg_file *)hdr)->data, mm_buf);
+			}
+		} else if (prof->list[i].type == dsc_cmd) {
+			pcmd = prof->list[i].offset + (char *)cnt;
+			size = *(uint16_t *)pcmd;
+			dsp_msg_store(size, (uint8_t *)pcmd + 2, mm_buf);
+		}
+	}
+
+	re25c_buf[0] = 0;
+	re25c_buf[1] = (0x80 | MODULE_SPEAKERBOOST);
+	re25c_buf[2] = SB_PARAM_SET_RE25C;
+	dsp_msg_store(sizeof(re25c_buf), re25c_buf, mm_buf);
+
+	/* add mm byte length */
+#if defined(TFA_2SB_INSTANCE)
+	mm_buf8[6] = (uint8_t)((mm_length >> 8) & 0xff);
+	mm_buf8[7] = (uint8_t)(mm_length & 0xff);
+#else
+	mm_buf8[2] = (uint8_t)((mm_length >> 8) & 0xff);
+	mm_buf8[3] = (uint8_t)(mm_length & 0xff);
+#endif
+
+	mm_buf[mm_ptr_idx] = 0x0; /* mm tail word : zero */
+	mm_length += 4;
+
+	if (is_bypass == 1)
+		return 0;
+	return mm_length;
+}
+#endif /* TFA_DSP_MSG_OPTIMIZATION */
 

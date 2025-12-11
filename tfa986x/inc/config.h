@@ -24,7 +24,9 @@
 #define TFA_4PA_DEVICE
 #endif
 #define TFA_PLATFORM_MTK
+#define TFA_2SB_INSTANCE
 #define TFA_SUPPORT_NEW_DATALOGGER
+//#define TFA_DSP_MSG_OPTIMIZATION
 
 #endif /* __CONFIG_LINUX_KERNEL_INC__ */
 

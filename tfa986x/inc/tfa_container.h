@@ -87,7 +87,7 @@ int tfa_cont_get_idx_tfadsp(struct tfa_device *tfa, int tfadsp_idx);
 * @param tfa the device struct pointer
 * @return the func(tfadsp instance id) of device
 */
-uint8_t tfa_cont_get_dev_func(struct tfa_device* tfa, uint8_t i2c_addr);
+int tfa_cont_get_dev_func(struct tfa_device* tfa, uint8_t i2c_addr);
 
 /*
  * Get the number of tfadsp device (address 0).
@@ -247,6 +247,13 @@ struct tfa_profile_list *tfa_cont_get_dev_prof_list
 int tfa_cnt_get_dev_nprof(struct tfa_device *tfa);
 
 /*
+ * Get the number of profiles for device from contaienr
+ * @param tfa the device struct pointer
+ * @return number of profiles
+ */
+int tfa_cnt_get_nprof_from_dev_idx(struct tfa_device* tfa, int dev_idx);
+
+/*
  * Get the Nth livedata for the Nth device
  * @param cont pointer to the tfaContainer
  * @param dev_idx the index of the device
@@ -351,6 +358,19 @@ enum tfa98xx_error tfa98xx_factory_trimmer(struct tfa_device *tfa);
  * @return Tfa98xx_Error
  */
 enum tfa98xx_error tfa_set_filters(struct tfa_device *tfa, int prof_idx);
+
+#if defined(TFA_DSP_MSG_OPTIMIZATION)
+/*
+ * Write dsp msg in the buffer ppol
+ * @param container struct pointer
+ * @param tfadsp device id
+ * @param profile index
+ * @param dsp msg buffer pointer
+ * @return dsp msg length
+ */
+int tfa_cont_write_dsp_msg(struct tfa_container *cnt, int dev_tfadsp,
+	int prof_idx, int *mm_buf);
+#endif
 
 /*
  * Get the firmware version from the patch in the container file

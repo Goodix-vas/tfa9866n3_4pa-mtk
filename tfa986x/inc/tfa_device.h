@@ -128,6 +128,11 @@ struct tfa98xx_buffer_pool {
 /* MAX_HANDLES * ID_BLACKBOX_MAX */
 #define LOG_BUFFER_SIZE 36
 
+#if defined(TFA_DSP_MSG_OPTIMIZATION)
+#define MAX_TFADSP_DEV_NUM 2
+#define MAX_TFADSP_PROF_NUM 6
+#endif
+
 /*
  * This is the main tfa device context structure, it will carry all information
  * that is needed to handle a single I2C device instance.
@@ -136,7 +141,6 @@ struct tfa98xx_buffer_pool {
 struct tfa_device {
 	int dev_idx;
 	int in_use;
-	int buffer_size;
 	int has_msg;
 	unsigned char resp_address;
 	unsigned short rev;
@@ -201,6 +205,10 @@ struct tfa_device {
 	int set_device;
 	int set_config;
 	struct tfa98xx_buffer_pool buf_pool[POOL_MAX_INDEX];
+#if defined(TFA_DSP_MSG_OPTIMIZATION)
+	struct tfa98xx_buffer_pool
+		dsp_msg_pool[MAX_TFADSP_DEV_NUM][MAX_TFADSP_PROF_NUM];
+#endif
 	int lower_limit_cal;
 	int upper_limit_cal;
 	char fw_lib_ver[3];
@@ -216,6 +224,9 @@ struct tfa_device {
 	int ipcid[3];
 	int send_set_logger;
 	int nr_tfadsp;
+	int tfadsp_handle;
+	int func;
+	unsigned int stc_off;
 };
 
 /*

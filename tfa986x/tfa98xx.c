@@ -100,11 +100,11 @@ static struct snd_kcontrol_new *tfa98xx_controls;
 static struct tfa_container *tfa98xx_container;
 
 static int buf_pool_size[POOL_MAX_INDEX] = {
-	64 * 1024,
-	64 * 1024,
-	64 * 1024,
-	64 * 1024,
-	64 * 1024,
+	16 * 1024,
+	16 * 1024,
+	16 * 1024,
+	16 * 1024,
+	16 * 1024,
 	8 * 1024
 };
 
@@ -1374,14 +1374,16 @@ static int tfa98xx_run_calibration(struct tfa98xx *tfa98xx0)
 	u16 temp_val = DEFAULT_REF_TEMP; /* default */
 	int temp_calflag = 0;
 	int ramp_steps;
+	int tfadsp_id = 0;
 
 	if (tfa98xx0 == NULL || tfa98xx0->tfa == NULL)
 		return 0;
 
-	pr_info("%s: begin\n", __func__);
+	tfadsp_id = tfa98xx0->tfa->func;
+	pr_info("%s: begin tfadsp%d\n", __func__, tfadsp_id);
 
 	if (tfa98xx0->pstream == 0) {
-		pr_info("[0x%x] %s: calibration is available only when channel is enabled!\n",
+		pr_err("[0x%x] %s: calibration is available only when channel is enabled!\n",
 			tfa98xx0->i2c->addr, __func__);
 		return -EIO;
 	}
@@ -1394,17 +1396,22 @@ static int tfa98xx_run_calibration(struct tfa98xx *tfa98xx0)
 		temp_val = DEFAULT_REF_TEMP; /* default */
 	}
 
+#if 0 // ToCheck : it may not need
 	if (tfa98xx0->tfa->is_bypass)
 		pr_debug("%s: skipped setting bypass - tfadsp in bypass\n",
 			__func__);
 	else
 		tfa98xx_set_tfadsp_bypass(tfa98xx0->tfa);
+#endif
 
 	ndev = tfa98xx0->tfa->dev_count;
 
 	for (idx = 0; idx < ndev; idx++) {
 		tfa = tfa98xx_get_tfa_device_from_index(idx);
 		if (tfa == NULL)
+			continue;
+
+		if (tfa->func != tfadsp_id)
 			continue;
 
 		/* MTPEX <reset to force to calibrate> */
@@ -1441,6 +1448,9 @@ static int tfa98xx_run_calibration(struct tfa98xx *tfa98xx0)
 	msleep_interruptible(10);
 
 	list_for_each_entry(tfa98xx, &tfa98xx_device_list, list) {
+		if (tfa98xx->tfa->func != tfadsp_id)
+			continue;
+
 		pr_info("%s: dev %d - stopping devices\n",
 			__func__, tfa98xx->tfa->dev_idx);
 
@@ -1463,6 +1473,9 @@ static int tfa98xx_run_calibration(struct tfa98xx *tfa98xx0)
 		if (tfa == NULL)
 			continue;
 
+		if (tfa->func != tfadsp_id)
+			continue;
+
 		tfa98xx = (struct tfa98xx *)tfa->data;
 		pr_info("%s: dev %d - starting devices for calibration\n",
 			__func__, idx);
@@ -1482,6 +1495,9 @@ static int tfa98xx_run_calibration(struct tfa98xx *tfa98xx0)
 			pr_warn("[0x%x] failure in starting device for calibration! (err %d)\n",
 				tfa98xx->i2c->addr, ret);
 			cal_err |= ret;
+		} else {
+			if (idx == 0 || idx == 2) /* to avoid reset in the tfa_restore_after_cal */
+				tfa_set_status_flag(tfa98xx->tfa, TFA_SET_DEVICE, 1);
 		}
 
 		pr_debug("%s: [%d] force UNMUTE before calibration\n",
@@ -1502,12 +1518,15 @@ static int tfa98xx_run_calibration(struct tfa98xx *tfa98xx0)
 		if (tfa == NULL)
 			continue;
 
+		if (tfa->func != tfadsp_id)
+			continue;
+
 		/* restore flag for auto calibration */
 		tfa->disable_auto_cal = temp_calflag;
 	}
 
 	if (cal_err) {
-		pr_info("%s: calibration failed! (err %d)\n",
+		pr_err("%s: calibration failed! (err %d)\n",
 			__func__, cal_err);
 		return -EIO;
 	}
@@ -3123,7 +3142,8 @@ enum tfa98xx_error tfa98xx_write_register16(struct tfa_device *tfa,
 retry:
 	ret = regmap_write(tfa98xx->regmap, subaddress, value);
 	if (ret < 0) {
-		pr_warn("i2c error, retries left: %d\n", retries);
+		pr_warn("i2c write error at subaddress 0x%x, err %d, retries left: %d\n",
+					subaddress, ret, retries);
 
 		if (retries) {
 			retries--;
@@ -3174,8 +3194,8 @@ enum tfa98xx_error tfa98xx_read_register16(struct tfa_device *tfa,
 retry:
 	ret = regmap_read(tfa98xx->regmap, subaddress, &value);
 	if (ret < 0) {
-		pr_warn("i2c error at subaddress 0x%x, retries left: %d\n",
-			subaddress, retries);
+		pr_warn("i2c read error at subaddress 0x%x, err %d, retries left: %d\n",
+			subaddress, ret, retries);
 
 		if (retries) {
 			retries--;
@@ -3416,12 +3436,6 @@ static void tfa98xx_container_loaded
 		return;
 	}
 
-	/*
-	 * i2c transaction limited to 64k
-	 * (Documentation/i2c/writing-clients)
-	 */
-	tfa98xx->tfa->buffer_size = 65536;
-
 	/* DSP messages via i2c/ipc */
 	tfa98xx->tfa->has_msg = 0;
 
@@ -3485,7 +3499,28 @@ static void tfa98xx_container_loaded
 	/* allocate buffer_pool */
 	if (tfa98xx == tfa98xx_head_device) {
 		int index = 0;
+#if defined(TFA_DSP_MSG_OPTIMIZATION)
+		int tfadsp_nr, i, j;
+		int tfadsp_dev = 0, tfadsp_profs = 0;
+		struct tfa98xx_buffer_pool* buf_pool;
+		tfadsp_nr = tfa_cnt_get_dev_ntfadsp(tfa98xx->tfa);
 
+		for (i = 0; i < tfadsp_nr; i++) {
+			tfadsp_dev = tfa_cont_get_idx_tfadsp(tfa98xx->tfa, i);
+			tfadsp_profs= tfa_cnt_get_nprof_from_dev_idx(tfa98xx->tfa, tfadsp_dev);
+			for (j = 0; j < tfadsp_profs; j++) {
+				buf_pool = &(tfa98xx->tfa->dsp_msg_pool[i][j]);
+				if (buf_pool->pool != NULL)
+					kfree(buf_pool->pool);		
+				buf_pool->pool = kmalloc(16*1024, GFP_KERNEL);
+				if (buf_pool->pool) {
+					buf_pool->in_use = 1;
+					buf_pool->size = tfa_cont_write_dsp_msg(tfa98xx->tfa->cnt,
+						tfadsp_dev, j, buf_pool->pool);
+				}
+			}
+		}
+#endif
 		pr_info("Allocate buffer_pool\n");
 		for (index = 0; index < POOL_MAX_INDEX; index++)
 			tfa_buffer_pool(tfa98xx->tfa, index,
@@ -3693,7 +3728,6 @@ static void tfa98xx_dsp_init(struct tfa98xx *tfa98xx)
 {
 	int ret;
 	static bool failed;
-	bool reschedule = false;
 	bool sync = false;
 	bool do_sync;
 	int active_device_count = tfa98xx_device_count;
@@ -3741,22 +3775,6 @@ static void tfa98xx_dsp_init(struct tfa98xx *tfa98xx)
 	}
 
 	mutex_unlock(&tfa98xx->dsp_lock);
-
-	if (reschedule) {
-		struct tfa98xx *ntfa98xx;
-
-		failed = false;
-
-		/* reschedule this init work for later */
-		list_for_each_entry(ntfa98xx, &tfa98xx_device_list, list) {
-			ntfa98xx->init_count++;
-			pr_info("%s: dsp_init (direct) with device %d, profile %d\n",
-				__func__,
-				ntfa98xx->tfa->dev_idx,
-				ntfa98xx->profile);
-			tfa98xx_dsp_init(ntfa98xx);
-		}
-	}
 
 	if (!sync)
 		return;
@@ -4341,11 +4359,29 @@ static void tfa98xx_remove(struct snd_soc_component *component)
 	/* deallocate buffer_pool */
 	if (tfa98xx == tfa98xx_head_device) {
 		int index = 0;
+#if defined(TFA_DSP_MSG_OPTIMIZATION)
+		int i, j;
+		struct tfa98xx_buffer_pool* buf_pool;
+#endif
 
 		pr_info("Deallocate buffer_pool\n");
 		for (index = 0; index < POOL_MAX_INDEX; index++)
 			tfa_buffer_pool(tfa98xx->tfa,
 				index, 0, POOL_FREE);
+#if defined(TFA_DSP_MSG_OPTIMIZATION)
+		/* free all */
+		for (i = 0; i < MAX_TFADSP_DEV_NUM; i++) {
+			for (j = 0; j < MAX_TFADSP_PROF_NUM; j++) {
+				buf_pool = &(tfa98xx->tfa->dsp_msg_pool[i][j]);
+				if (buf_pool->pool != NULL) {
+					kfree(buf_pool->pool);
+					buf_pool->pool = NULL;
+					buf_pool->size = 0;
+					buf_pool->in_use = 0;
+				}
+			}
+		}
+#endif
 	}
 }
 
@@ -5583,6 +5619,7 @@ int tfa98xx_set_blackbox(int enable)
 	pr_info("%s: blackbox < %d\n", __func__, enable);
 	ret = tfa_set_blackbox(enable);
 
+#if 0 /* not necessary */
 	if (tfa->is_configured > 0) {
 		pr_info("%s: set blackbox directly\n", __func__);
 		tfa->individual_msg = 1;
@@ -5592,6 +5629,7 @@ int tfa98xx_set_blackbox(int enable)
 		ret = tfa_configure_log(enable);
 #endif
 	}
+#endif
 
 	return ret;
 }
@@ -5625,6 +5663,7 @@ int tfa98xx_get_blackbox_data(int dev, int *data)
 		return ret;
 	}
 
+#if 0 /* not necessary */
 	/* update current session if it's active */
 	/* check head device */
 	if (tfa98xx_count_active_stream(BIT_PSTREAM) > 0
@@ -5634,6 +5673,7 @@ int tfa98xx_get_blackbox_data(int dev, int *data)
 			pr_info("%s: failure in updating current data\n",
 				__func__);
 	}
+#endif
 
 	offset = dev * ID_BLACKBOX_MAX;
 	memcpy(data, tfa->log_data + offset,
@@ -5651,7 +5691,6 @@ int tfa98xx_get_blackbox_data_index(int dev, int index, int reset)
 {
 	struct tfa_device *tfa = NULL;
 	int ndev = 0;
-	enum tfa98xx_error ret = TFA98XX_ERROR_OK;
 	int offset;
 	int value = 0;
 
@@ -5679,6 +5718,7 @@ int tfa98xx_get_blackbox_data_index(int dev, int index, int reset)
 		return -ENODEV;
 	}
 
+#if 0 /* not necessary */
 	/* update current session if it's active */
 	/* check head device */
 	if (tfa98xx_count_active_stream(BIT_PSTREAM) > 0
@@ -5688,6 +5728,7 @@ int tfa98xx_get_blackbox_data_index(int dev, int index, int reset)
 			pr_info("%s: failure in updating current data\n",
 				__func__);
 	}
+#endif
 
 	offset = dev * ID_BLACKBOX_MAX;
 	value = tfa->log_data[offset + index];
@@ -5747,38 +5788,28 @@ EXPORT_SYMBOL(tfa_get_power_state);
 
 int tfa98xx_update_spkt_data(int idx)
 {
-	struct tfa_device *tfa = tfa98xx_get_tfa_device_from_index(0);
+	struct tfa_device *tfa = tfa98xx_get_tfa_device_from_index(idx);
 	struct tfa98xx *tfa98xx;
-	int ret = 0;
-	int value[MAX_HANDLES] = {0};
-	int i, ndev, data = 0;
-	int pm = 0;
-	int active_dev = 0;
+	int i, ndev, ret = 0;
+	static int spkt_values[MAX_HANDLES] = {0};
+	int *spkts = NULL;
+	int active_handle = tfa->active_handle;
 
 	if (tfa == NULL)
 		return DEFAULT_REF_TEMP; /* unused device */
 	if (tfa->tfa_family == 0)
 		return DEFAULT_REF_TEMP;
 
-	// active_handle : 1-->dev0, 2-->dev1, 4-->dev2, 8-->dev3, 15-->all
-	for (active_dev = 0; active_dev < MAX_HANDLES; active_dev++) {
-		if (tfa->active_handle & (1 << active_dev))
-			break;
+	if (tfa->stc_off == 1) {
+		pr_info("%s: skipped - stc_off state\n", __func__);
+		return DEFAULT_REF_TEMP;
 	}
-	pr_info("%s: switched to active handle - %d, active_dev - %d\n",
-		__func__, tfa->active_handle, active_dev);
 
-	if (active_dev == MAX_HANDLES)
-		active_dev = 0;
-	tfa = tfa98xx_get_tfa_device_from_index(active_dev);
-	if (tfa == NULL)
-		return DEFAULT_REF_TEMP;
-	if (tfa->tfa_family == 0)
-		return DEFAULT_REF_TEMP;
+	pr_info("%s: dev %d, active_handle %d\n",
+		__func__, idx, active_handle);
 
 	ndev = tfa->dev_count;
-	if ((ndev < 1)
-		|| (idx < 0 || idx >= ndev))
+	if ((ndev < 1) || (idx < 0 || idx >= ndev))
 		return DEFAULT_REF_TEMP;
 
 	if (tfa98xx_count_active_stream(BIT_PSTREAM) == 0) {
@@ -5799,45 +5830,40 @@ int tfa98xx_update_spkt_data(int idx)
 		return DEFAULT_REF_TEMP;
 	}
 
-	pm = tfa_get_power_state(idx);
-	// 0:normal, 1:low power mode, 2:idle power mode
-	pr_info("%s: tfa_stc - dev %d - power state 0x%x\n",
-		__func__, idx, pm);
-
-	if (pm > 1) /* reset temperature in idle power state */
-		return DEFAULT_REF_TEMP;
-
 	if (tfa->is_configured <= 0) {
 		pr_info("%s: skipped - tfadsp is not active\n",
 			__func__);
 		return DEFAULT_REF_TEMP;
 	}
 
-	pr_info("%s: tfa_stc - read tspkr for stc\n",
-		__func__);
+	if (idx < 2)
+		spkts = &spkt_values[0];
+	else
+		spkts = &spkt_values[2];
 
 	tfa98xx = (struct tfa98xx *)tfa->data;
 
 	mutex_lock(&tfa98xx->dsp_lock);
-	ret = tfa_read_tspkr(tfa, value);
+	ret = tfa_read_tspkr(tfa, spkts);
 	mutex_unlock(&tfa98xx->dsp_lock);
 	if (ret) {
 		pr_info("%s: tfa_stc failed to read data from amplifier\n",
 			__func__);
-		value[idx] = DEFAULT_REF_TEMP;
+		spkt_values[idx] = DEFAULT_REF_TEMP;
 	}
-	if (value[idx] == 0xffff) {
-		pr_info("%s: tfa_stc read wrong data from amplifier\n",
-			__func__);
+	if (spkt_values[idx] > TFA2_FW_T_DATA_MAX) {
+		pr_err("%s: spkt %d is wrong data\n", __func__, spkt_values[idx]);
+		spkt_values[idx] = DEFAULT_REF_TEMP;
 	}
-	data = value[idx];
+	pr_info("%s: read spkt[%d] %d\n", __func__, idx, spkt_values[idx]);
 
 	for (i = 0; i < ndev; i++)
 		pr_debug("%s: data[%d]%s - %d\n", __func__, i,
-			(idx == i) ? "*" : "", value[i]);
+			(idx == i) ? "*" : "", spkt_values[i]);
 
-	return data;
+	return spkt_values[idx];
 }
+
 EXPORT_SYMBOL(tfa98xx_update_spkt_data);
 
 int tfa98xx_update_spkt_data_channel(int channel)
@@ -5850,46 +5876,32 @@ EXPORT_SYMBOL(tfa98xx_update_spkt_data_channel);
 
 int tfa98xx_write_sknt_control(int idx, int value)
 {
-	struct tfa_device *tfa = tfa98xx_get_tfa_device_from_index(0);
+	struct tfa_device *tfa = tfa98xx_get_tfa_device_from_index(idx);
 	struct tfa98xx *tfa98xx;
-	int ret = 0;
-	int pm = 0;
-	int i, ndev, ready = 0;
-	static int data[MAX_HANDLES] = {
+	int i, ndev, ret = 0;
+	int *sknts = NULL;
+	int active_handle = tfa->active_handle;
+	static int ready = 0;
+	static int sknt_data[MAX_HANDLES] = {
 		DEFAULT_REF_TEMP, DEFAULT_REF_TEMP,
 		DEFAULT_REF_TEMP, DEFAULT_REF_TEMP
 	};
-	static int update[MAX_HANDLES];
-#if 0 // [TODO]
-	struct tfa_device *ntfa = tfa98xx_get_tfa_device_from_index(idx);
-	int group = 0;
-#endif
-	int active_dev = 0;
 
 	if (tfa == NULL)
 		return -ENODEV;
 	if (tfa->tfa_family == 0)
 		return -ENODEV;
 
-	// active_handle : 1-->dev0, 2-->dev1, 4-->dev2, 8-->dev3, 15-->all
-	for (active_dev = 0; active_dev < MAX_HANDLES; active_dev++) {
-		if (tfa->active_handle & (1 << active_dev))
-			break;
+	if (tfa->stc_off == 1) {
+		pr_info("%s: skipped - stc_off state\n", __func__);
+		goto tfa98xx_write_sknt_control_exit;
 	}
-	pr_info("%s: switched to active handle - %d, active_dev - %d\n",
-		__func__, tfa->active_handle, active_dev);
 
-	if (active_dev == MAX_HANDLES)
-		active_dev = 0;
-	tfa = tfa98xx_get_tfa_device_from_index(active_dev);
-	if (tfa == NULL)
-		return -ENODEV;
-	if (tfa->tfa_family == 0)
-		return -ENODEV;
+	pr_info("%s: dev %d, sknt %d, active_handle %d\n",
+		__func__, idx, value, active_handle);
 
 	ndev = tfa->dev_count;
-	if ((ndev < 1)
-		|| (idx < 0 || idx >= ndev))
+	if ((ndev < 1) || (idx < 0 || idx >= ndev))
 		return -EINVAL;
 
 	if (tfa98xx_count_active_stream(BIT_PSTREAM) == 0) {
@@ -5916,54 +5928,35 @@ int tfa98xx_write_sknt_control(int idx, int value)
 		goto tfa98xx_write_sknt_control_exit;
 	}
 
-#if 0 // [TODO]
-	if (tfa_is_active_device(ntfa)) {
-		group = idx * ID_BLACKBOX_MAX;
-		if (ntfa->log_data[group + ID_MAXTSURF_LOG]
-			< value)
-			ntfa->log_data[group + ID_MAXTSURF_LOG]
-				= value;
-		if (value > TSURFMAX)
-			ntfa->log_data[group + ID_OVERTSURFMAX_COUNT]++;
+	if ((active_handle & (1 << idx)) == 0) {
+		pr_info("%s: skipped - inactive device\n",
+			__func__);
+		return ret;
 	}
-#endif
 
-	//pm = tfa_get_power_state(idx);
-
-	pr_info("%s: tfa_stc - dev %d - set surface temperature (%d)\n",
-		__func__, idx, value);
-	if (update[idx])
-		pr_debug("%s: tfa_stc - dev %d - overwrite data\n",
-			__func__, idx);
-
-	data[idx] = value;
-	update[idx] = 1;
-
-	for (i = 0; i < ndev; i++) {
-		pm = tfa_get_power_state(i);
-		if (pm & 0x4) { /* count power down */
-			pr_info("%s: tfa_stc - dev %d: check power down\n",
-				__func__, i);
-			ready++;
-			data[i] = DEFAULT_REF_TEMP;
-			continue;
+	sknt_data[idx] = value;
+	if (idx >= 0 && idx < 2) { /* tfadsp0 */
+		active_handle &= 0x3;
+		ready |= (1 << idx);
+		if (active_handle == (ready&0x3)) {
+			sknts = &sknt_data[0];
 		}
-		if (update[i] > 0)
-			ready++;
+	} else if (idx >= 2 && idx < 4) { /* tfadsp1 */
+		active_handle &= 0xC;
+		ready |= (1 << idx);
+		if (active_handle == (ready&0xC)) {
+			sknts = &sknt_data[2];
+		}
 	}
-
-	if (ready < ndev)
-		/* wait until all the active devices are ready */
+	if (sknts == NULL)
 		return ret;
 
-	pr_info("%s: tfa_stc - write volume for stc\n",
-		__func__);
+	pr_info("%s: tfa_stc - write volume for stc\n", __func__);
 
 	tfa98xx = (struct tfa98xx *)tfa->data;
-
 	mutex_lock(&tfa98xx->dsp_lock);
 	tfa->individual_msg = 1;
-	ret = tfa_write_volume(tfa, data);
+	ret = tfa_write_volume(tfa, sknts);
 	mutex_unlock(&tfa98xx->dsp_lock);
 	if (ret) {
 		pr_info("%s: tfa_stc failed to write data to amplifier\n",
@@ -5971,14 +5964,20 @@ int tfa98xx_write_sknt_control(int idx, int value)
 		goto tfa98xx_write_sknt_control_exit;
 	}
 
-	for (i = 0; i < ndev; i++)
-		pr_debug("%s: data[%d]%s - %d\n", __func__, i,
-			(update[i]) ? "*" : "", data[i]);
+	sknts[0] = 0;
+	sknts[1] = 0;
+	if (idx >= 0 && idx < 2)
+		ready &= 0xC;
+	else if (idx >= 2 && idx < 4)
+		ready &= 0x3;
+
+	return ret;
 
 tfa98xx_write_sknt_control_exit:
-	pr_info("%s: tfa_stc - reset update flags\n",
-		__func__);
-	memset(update, 0, ndev * sizeof(int));
+	pr_info("%s: tfa_stc - reset update flags\n", __func__);
+	ready = 0;
+	for (i = 0; i < MAX_HANDLES; i++)
+		sknt_data[i] = DEFAULT_REF_TEMP;
 
 	return ret;
 }

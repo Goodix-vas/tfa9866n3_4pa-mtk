@@ -17,6 +17,12 @@
 
 /* ---------------------------------------------------------------------- */
 
+static ssize_t stc_off_show(struct device *dev,
+	struct device_attribute *attr, char *buf);
+static ssize_t stc_off_store(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t size);
+static DEVICE_ATTR_RW(stc_off);
+
 static ssize_t spkt0_show(struct device *dev,
 	struct device_attribute *attr, char *buf);
 static ssize_t spkt0_store(struct device *dev,
@@ -96,6 +102,7 @@ static ssize_t ocp_noclk_store(struct device *dev,
 static DEVICE_ATTR_RW(ocp_noclk);
 
 static struct attribute *tfa_stc_attr[] = {
+	&dev_attr_stc_off.attr,
 	&dev_attr_spkt0.attr,
 	&dev_attr_spkt1.attr,
 	&dev_attr_spkt2.attr,
@@ -121,6 +128,8 @@ static struct attribute_group tfa_stc_attr_grp = {
 static struct device *tfa_stc_dev;
 
 static int sknt_data[MAX_HANDLES];
+
+static unsigned int stc_off_flag = 0;
 
 /* ---------------------------------------------------------------------- */
 
@@ -149,6 +158,40 @@ static ssize_t update_sknt_control(int idx, char *buf)
 	if (size <= 0) {
 		pr_err("%s: tfa_stc failed to show in sysfs file\n", __func__);
 		return -EINVAL;
+	}
+
+	return size;
+}
+
+static ssize_t stc_off_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	int size = 0;
+
+	size = snprintf(buf, 2, "%d", stc_off_flag);
+	pr_info("%s: stc_off_flag %d\n", __func__, stc_off_flag);
+
+	return size;
+}
+
+static ssize_t stc_off_store(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t size)
+{
+	int ret, i;
+	struct tfa_device *tfa = NULL;
+
+	ret = kstrtou32(buf, 10, &stc_off_flag);
+	if (ret < 0) {
+		pr_info("%s: do nothing\n", __func__);
+		return size;
+	}
+	pr_info("%s: stc_off_flag %d\n", __func__, stc_off_flag);
+
+	tfa = tfa98xx_get_tfa_device_from_index(0);
+	for (i = 0; i < tfa->dev_count; i++) {
+		tfa = tfa98xx_get_tfa_device_from_index(i);
+		if (tfa != NULL)
+			tfa->stc_off = stc_off_flag;
 	}
 
 	return size;
