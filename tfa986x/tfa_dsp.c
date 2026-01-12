@@ -1027,17 +1027,26 @@ static enum tfa98xx_error _dsp_msg(struct tfa_device *tfa, int lastmessage)
 	/* send messages to the target selected */
 	if (tfa98xx_count_active_stream(BIT_PSTREAM) > 0) {
 		if (tfa->has_msg == 0) { /* via i2c/ipc */
-			/* Send to the target selected */
-			if (tfa->dev_ops.dsp_msg) {
-				error = (tfa->dev_ops.dsp_msg)
-					((void *)tfa, len, (const char *)blob);
-				if (error != TFA98XX_ERROR_OK) {
-					pr_err("%s: IPC error %d\n", __func__, error);
-					error = TFA98XX_ERROR_OK;
+			int dsp_msg_sent = 0, i = 0;
+			struct tfa_device *ntfa;
+
+			for (i = 0; i < tfa->dev_count; i++) {
+				ntfa = tfa98xx_get_tfa_device_from_index(i);			
+				if (ntfa != NULL && ntfa->dev_ops.dsp_msg) {
+					/* Send to the target selected */
+					error = (ntfa->dev_ops.dsp_msg)
+						((void *)tfa, len, (const char *)blob);
+					if (error != TFA98XX_ERROR_OK) {
+						pr_err("%s: IPC error %d\n", __func__, error);
+						error = TFA98XX_ERROR_OK;
+					}
+					dsp_msg_sent = 1;
+					break;
 				}
-			} else {
-				pr_err("%s: dsp_msg is NULL\n", __func__);
+
 			}
+			if (dsp_msg_sent == 0)
+				pr_err("%s: dsp_msg is NULL\n", __func__);
 		}
 	} else {
 		pr_info("%s: skip if PSTREAM is lost\n",

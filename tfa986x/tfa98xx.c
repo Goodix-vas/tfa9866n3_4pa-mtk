@@ -3269,7 +3269,7 @@ int ipi_tfadsp_write(void *tfa, int length, const char *buf)
 	}
 
 	if (length >= 3)
-		pr_debug("%s: [0]:0x%02x-[1]:0x%02x-[2]:0x%02x, length:%d\n",
+		pr_info("%s: [0]:0x%02x-[1]:0x%02x-[2]:0x%02x, length:%d\n",
 			__func__, buf[0], buf[1], buf[2], length);
 
 	ret = mtk_spk_send_ipi_buf_to_dsp((void *)buf, (uint32_t)length);
@@ -3447,7 +3447,7 @@ static void tfa98xx_container_loaded
 		return;
 	}
 
-/* TEMPORARY, until TFA device is probed before tfa_ext is called */
+	/* TEMPORARY, until TFA device is probed before tfa_ext is called */
 	if (tfa98xx->tfa->is_probus_device) {
 		if (!tfa_get_ipc_loaded()) {
 			/* Q_PLATFORM: IPC ON PAL TO COMMUNICATE BETWEEN HAL AND ADSP */
@@ -3597,7 +3597,7 @@ static int tfa98xx_load_container(struct tfa98xx *tfa98xx)
 		ret = request_firmware_nowait(THIS_MODULE,
 			FW_ACTION_HOTPLUG,
 			fw_name, tfa98xx->dev, GFP_KERNEL,
-			tfa98xx, tfa98xx_container_loaded);	
+			tfa98xx, tfa98xx_container_loaded);
 #endif
 		/* wait until driver completes loading */
 		msleep_interruptible(20);
@@ -4386,6 +4386,7 @@ static void tfa98xx_remove(struct snd_soc_component *component)
 }
 
 static const struct snd_soc_component_driver soc_component_dev_tfa98xx = {
+	.name = "tfa98xx",
 	.probe = tfa98xx_probe,
 	.remove = tfa98xx_remove,
 };
@@ -6131,7 +6132,7 @@ static int tfa98xx_i2c_probe(struct i2c_client *i2c,
 	}
 
 #if defined(TFA_PLATFORM_QUALCOMM)
-	tfa98xx->tfa->dummy_cal= DUMMY_CALIBRATION_DATA;
+	tfa98xx->tfa->dummy_cal = DUMMY_CALIBRATION_DATA;
 #endif
 	if (np) {
 		ret = tfa98xx_parse_limit_cal_dt(&i2c->dev, tfa98xx, np);
@@ -6149,7 +6150,7 @@ static int tfa98xx_i2c_probe(struct i2c_client *i2c,
 				/* set default value instead */
 			}
 #if defined(TFA_PLATFORM_QUALCOMM)
-			tfa98xx->tfa->dummy_cal= tfa98xx->tfa->mohm[0];
+			tfa98xx->tfa->dummy_cal = tfa98xx->tfa->mohm[0];
 			dev_info(&i2c->dev, "[0x%x] dummy_cal : %d\n", i2c->addr, tfa98xx->tfa->dummy_cal);
 #endif
 		}
