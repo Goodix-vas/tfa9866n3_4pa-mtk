@@ -46,7 +46,8 @@ static int dsp_cal_value[MAX_CHANNELS] = {-1, -1, -1, -1};
 static int dsp_cal_value[MAX_CHANNELS] = {-1, -1};
 #endif
 
-static int tfadsp_activemask = 0x0; /* 0x1:tfadsp0, 0x2:tfadsp1 */
+#define MAX_TFADSP_INSTANCE 2
+static int dev_active_count[MAX_TFADSP_INSTANCE] = {0};
 
 static enum tfa98xx_error tfa_calibration_range_check(struct tfa_device *tfa,
 	unsigned int channel, int mohm);
@@ -1043,7 +1044,6 @@ static enum tfa98xx_error _dsp_msg(struct tfa_device *tfa, int lastmessage)
 					dsp_msg_sent = 1;
 					break;
 				}
-
 			}
 			if (dsp_msg_sent == 0)
 				pr_err("%s: dsp_msg is NULL\n", __func__);
@@ -1194,9 +1194,15 @@ enum tfa98xx_error dsp_msg_read(struct tfa_device *tfa,
 
 	bytes[0] = tfa->func; /* tfadsp instance id */
 	if (tfa->has_msg == 0) { /* via i2c/ipc */
-		if (tfa->dev_ops.dsp_msg_read)
-			error = (tfa->dev_ops.dsp_msg_read)((void *)tfa,
-				length, bytes);
+		struct tfa_device *ntfa;
+		for (i = 0; i < tfa->dev_count; i++) {
+			ntfa = tfa98xx_get_tfa_device_from_index(i);			
+			if (ntfa != NULL && ntfa->dev_ops.dsp_msg_read) {
+				error = (ntfa->dev_ops.dsp_msg_read)((void *)tfa,
+					length, bytes);
+				break;
+			}
+		}
 	}
 	if (error == TFA98XX_ERROR_OK)
 		pr_debug("%s: OK\n", __func__);
@@ -2225,16 +2231,24 @@ enum tfa98xx_error tfa_set_calibration_values(struct tfa_device *tfa)
 		/* send messages to the target selected */
 		if (tfa98xx_count_active_stream(BIT_PSTREAM) > 0) {
 			/* Send to the target selected */
-			if (tfa0->dev_ops.dsp_msg) {
-				err = (tfa0->dev_ops.dsp_msg)
-					((void*)tfa0, buf_pool->size, (const char*)buf_pool->pool);
-				if (err != TFA98XX_ERROR_OK) {
-					pr_err("%s: IPC error %d\n", __func__, err);
-					err = TFA98XX_ERROR_OK;
-					goto set_calibration_values_exit;
+			struct tfa_device *ntfa;
+			err = TFA98XX_ERROR_OTHER;
+			for (i = 0; i < tfa0->dev_count; i++) {
+				ntfa = tfa98xx_get_tfa_device_from_index(i);			
+				if (ntfa != NULL && ntfa->dev_ops.dsp_msg) {
+					err = (ntfa->dev_ops.dsp_msg)((void *)tfa0,
+						buf_pool->size, (const char*)buf_pool->pool);
+					break;
 				}
-			} else {
+			}
+			if (err == TFA98XX_ERROR_OTHER) {
 				pr_err("%s: IPC function is null\n", __func__);
+				err = TFA98XX_ERROR_OK;
+				goto set_calibration_values_exit;
+			}
+			if (err != TFA98XX_ERROR_OK) {
+				pr_err("%s: IPC error %d\n", __func__, err);
+				err = TFA98XX_ERROR_OK;
 				goto set_calibration_values_exit;
 			}
 		} else {
@@ -2297,7 +2311,7 @@ enum tfa98xx_error tfa_run_speaker_boost(struct tfa_device *tfa,
 	int force, int profile)
 {
 	enum tfa98xx_error err = TFA98XX_ERROR_OK;
-	int value;
+	int value, set_devices;
 
 	if (tfa == NULL) {
 		pr_err("%s: tfa is NULL\n",	__func__);
@@ -2326,21 +2340,28 @@ enum tfa98xx_error tfa_run_speaker_boost(struct tfa_device *tfa,
 	/* CHECK: only once before buffering */
 	/* at initial device only: to flush buffer */
 	/* 1st device only */
-	if (tfa_count_status_flag(tfa, TFA_SET_DEVICE) == 1)
-		tfadsp_activemask = 0x0;
+	set_devices = tfa_count_status_flag(tfa, TFA_SET_DEVICE);
+	if (set_devices == 1) {
+		/* reset if tfa is 1st device */
+		dev_active_count[0] = 0;
+		dev_active_count[1] = 0;
+	}
 
-	tfa->tfadsp_handle = tfa->func;
-	if (((0x1 << tfa->tfadsp_handle) & tfadsp_activemask) == 0) {
+	dev_active_count[tfa->func]++;
+	/* tfadsp# is activated when 2 devices are ready */
+	if (dev_active_count[tfa->func] == 2) {
 		mutex_lock(&dsp_msg_lock);
-		tfadsp_activemask |= (0x1 << tfa->tfadsp_handle);
+		tfa->tfadsp_handle = tfa->func;
 		pr_debug("%s: flush buffer in blob, in cold start\n",
 			__func__);
 		err = tfa_tib_dsp_msgmulti(tfa, -2, NULL);
 		mutex_unlock(&dsp_msg_lock);
-	} else
+		dev_active_count[tfa->func] = 0;
+	} else {
 		tfa->tfadsp_handle = -1; // tfadsp is not active
-	pr_info("%s: tfadsp_handle %d, tfadsp_activemask %d\n", 
-		__func__, tfa->tfadsp_handle, tfadsp_activemask);
+	}
+	pr_info("%s: set_devices %d, tfa->func %d, tfadsp_handle %d\n", 
+		__func__, set_devices, tfa->func, tfa->tfadsp_handle);
 
 	/* cold start */
 	if (value) {
@@ -3662,7 +3683,7 @@ tfa_dev_start_exit:
 	mutex_lock(&dev_lock);
 	if (tfa_count_status_flag(tfa, TFA_SET_DEVICE)
 		>= tfa->active_count)
-		/* reset counter */
+		/* last device --> reset counter */
 		tfa_set_status_flag(tfa, TFA_SET_DEVICE, -1);
 	mutex_unlock(&dev_lock);
 
@@ -3987,81 +4008,66 @@ static enum tfa98xx_error tfa_process_re25(struct tfa_device *tfa)
 	if (tfa->is_probus_device && tfa->dev_count > 1)
 		spkr_count = 2; /* stereo cal. value */
 
-	pr_info("%s: read SB_PARAM_GET_RE25C\n", __func__);
+	pr_info("%s: read SB_PARAM_GET_RE25C %d\n", __func__, tfa->dev_idx);
 
 	nr_bytes = spkr_count * 3;
-	channel = tfa_get_channel_from_dev_idx(tfa, -1);
-	if (channel == -1) {
-		pr_err("%s: failed in matching channel\n",
-			__func__);
-		return TFA98XX_ERROR_DEVICE;
-	}
+	if (tfa->tfadsp_handle != -1) {
+		int i;
+		struct tfa_device *ntfa;
 
-	if (tfa->tfadsp_handle != -1)
 		error = tfa_dsp_cmd_id_write_read(tfa,
 			MODULE_SPEAKERBOOST, SB_PARAM_GET_RE25C, nr_bytes, bytes);
-
-	if (error == TFA98XX_ERROR_OK) {
-		if (tfa->tfadsp_handle != -1 && tfadsp_id < 2)
-			tfa98xx_convert_bytes2data(nr_bytes, bytes, &data[tfadsp_id*2]);
-
-		pr_debug("%s: RE25C - dev %d, channel %d\n",
-			__func__, tfa->dev_idx, channel);
-		pr_debug("%s: RE25C - data[%d]=%d\n",
-			__func__, channel, data[channel]);
-
-			/* signed data has a limit of 30 Ohm */
-			scaled_data = data[channel];
-
-			tfa->mohm[cal_idx]
-				= TFA_ReZ_FP_INT(scaled_data,
-				TFA_FW_ReZ_SHIFT) * 1000
-				+ TFA_ReZ_FP_FRAC(scaled_data,
-				TFA_FW_ReZ_SHIFT);
-
-		pr_info("%s: %d mOhms\n", __func__, tfa->mohm[cal_idx]);
-
-		/* special case for stereo calibration, from SB 3.5 PRC1 */
-		if (tfa->mohm[cal_idx] == -128000) {
-			pr_err("%s: wrong calibration! (damaged speaker)\n",
-				__func__);
-			tfa->spkr_damaged = 1;
+		if (error != TFA98XX_ERROR_OK) {
+			pr_err("%s: tfa_dsp_cmd_id_write_read is failed, err=%d\n",
+				__func__, error);
+			return TFA98XX_ERROR_BAD_PARAMETER;
 		}
-	} else {
-		pr_err("%s: tfa_dsp_cmd_id_write_read is failed, err=%d\n",
-			__func__, error);
+		tfa98xx_convert_bytes2data(nr_bytes, bytes, &data[tfadsp_id*2]);
+		for (i = 0; i < tfa->dev_count; i++) {
+			ntfa = tfa98xx_get_tfa_device_from_index(i);
+			if (tfadsp_id == ntfa->func) {
+				channel = tfa_get_channel_from_dev_idx(ntfa, -1);
+				if (channel == -1) {
+					pr_err("%s: failed in matching channel\n",
+						__func__);
+					continue;
+				}
+				pr_debug("%s: RE25C - dev %d, data[%d]=%d\n",
+					__func__, ntfa->dev_idx, channel, data[channel]);
 
-		tfa->mohm[cal_idx] = -1;
+				/* signed data has a limit of 30 Ohm */
+				scaled_data = data[channel];
 
-		return TFA98XX_ERROR_BAD_PARAMETER;
-	}
+				ntfa->mohm[cal_idx]
+					= TFA_ReZ_FP_INT(scaled_data,
+					TFA_FW_ReZ_SHIFT) * 1000
+					+ TFA_ReZ_FP_FRAC(scaled_data,
+					TFA_FW_ReZ_SHIFT);
 
-	error = tfa_calibration_range_check(tfa,
-		channel, tfa->mohm[cal_idx]);
-	if (error != TFA98XX_ERROR_OK) {
-		pr_err("%s: calibration data is out of range: device %d\n",
-			__func__, tfa->dev_idx);
-		return TFA98XX_ERROR_BAD_PARAMETER;
-	}
+				pr_info("%s: %d mOhms\n", __func__, ntfa->mohm[cal_idx]);
+				/* special case for stereo calibration, from SB 3.5 PRC1 */
+				if (ntfa->mohm[cal_idx] == -128000) {
+					pr_err("%s: wrong calibration! (damaged speaker)\n",
+						__func__);
+					ntfa->spkr_damaged = 1;
+				}
+				/* set RE25 */
+				ret = tfa_dev_mtp_set(ntfa,
+					TFA_MTP_RE25, ntfa->mohm[cal_idx]);
+				if (ret != tfa_error_ok) {
+					pr_err("%s: writing calibration data failed to MTP, device %d err (%d)\n",
+						__func__, ntfa->dev_idx, ret);
+				}
+				/* set MTPEX */
+				ret = tfa_dev_mtp_set(ntfa, TFA_MTP_EX, 1);
+				if (ret != tfa_error_ok) {
+					pr_err("%s: setting MPTEX failed, device %d err (%d)\n",
+						__func__, ntfa->dev_idx, ret);
+				}
+			}
 
-	if (!tfa->is_probus_device)
-		return error;
+		}
 
-	/* set RE25 */
-	ret = tfa_dev_mtp_set(tfa,
-		TFA_MTP_RE25, tfa->mohm[cal_idx]);
-	if (ret != tfa_error_ok) {
-		pr_err("%s: writing calibration data failed to MTP, device %d err (%d)\n",
-			__func__, tfa->dev_idx, ret);
-		return TFA98XX_ERROR_RPC_CALIB_FAILED;
-	}
-
-	/* set MTPEX */
-	ret = tfa_dev_mtp_set(tfa, TFA_MTP_EX, 1);
-	if (ret != tfa_error_ok) {
-		pr_err("%s: setting MPTEX failed, device %d err (%d)\n",
-			__func__, tfa->dev_idx, ret);
-		return TFA98XX_ERROR_RPC_CALIB_FAILED;
 	}
 
 	return error;

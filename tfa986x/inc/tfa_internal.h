@@ -78,7 +78,7 @@ void tfa_handle_damaged_speakers(struct tfa_device *tfa);
 void tfa_set_spkgain(struct tfa_device *tfa);
 
 void tfa_restore_after_cal(int index, int cal_err);
-enum tfa98xx_error tfa_run_cal(int index, uint16_t *value);
+enum tfa98xx_error tfa_run_cal(int tfadsp_idx);
 enum tfa98xx_error tfa_get_cal_data(int index, uint16_t *value);
 enum tfa98xx_error tfa_get_cal_data_channel(int channel, uint16_t *value);
 enum tfa98xx_error tfa_set_cal_data(int index, uint16_t value);

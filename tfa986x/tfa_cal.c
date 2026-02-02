@@ -227,7 +227,7 @@ static ssize_t rdc0_store(struct device *dev,
 
 	ret = kstrtou32(buf, 10, &value);
 	if (ret < 0) {
-		pr_info("%s: wronmg value: %s\n", __func__, buf);
+		pr_info("%s: wrong value: %s\n", __func__, buf);
 		return -EINVAL;
 	}
 
@@ -266,7 +266,7 @@ static ssize_t rdc1_store(struct device *dev,
 
 	ret = kstrtou32(buf, 10, &value);
 	if (ret < 0) {
-		pr_info("%s: wronmg value: %s\n", __func__, buf);
+		pr_info("%s: wrong value: %s\n", __func__, buf);
 		return -EINVAL;
 	}
 
@@ -305,7 +305,7 @@ static ssize_t rdc2_store(struct device *dev,
 
 	ret = kstrtou32(buf, 10, &value);
 	if (ret < 0) {
-		pr_info("%s: wronmg value: %s\n", __func__, buf);
+		pr_info("%s: wrong value: %s\n", __func__, buf);
 		return -EINVAL;
 	}
 
@@ -344,7 +344,7 @@ static ssize_t rdc3_store(struct device *dev,
 
 	ret = kstrtou32(buf, 10, &value);
 	if (ret < 0) {
-		pr_info("%s: wronmg value: %s\n", __func__, buf);
+		pr_info("%s: wrong value: %s\n", __func__, buf);
 		return -EINVAL;
 	}
 
@@ -486,6 +486,7 @@ static ssize_t status_store(struct device *dev,
 	int idx, ndev = MAX_HANDLES;
 	uint16_t value;
 	int ret = 0, status;
+	int ret0 = 0, ret1 = 0;
 
 	/* Compare string, excluding the trailing \0 and the potentials eol */
 	if (!sysfs_streq(buf, "1") && !sysfs_streq(buf, "0")) {
@@ -495,6 +496,10 @@ static ssize_t status_store(struct device *dev,
 	}
 
 	ret = kstrtou32(buf, 10, &status);
+	if (ret < 0) {
+		pr_info("%s: wrong value: %s\n", __func__, buf);
+		return -EINVAL;
+	}
 	if (!status) {
 		pr_info("%s: do nothing\n", __func__);
 		return -EINVAL;
@@ -504,126 +509,59 @@ static ssize_t status_store(struct device *dev,
 		return -EINVAL;
 	}
 
-	pr_info("%s: tfa_cal tfadsp0 begin\n", __func__);
+	pr_info("%s: tfa_cal begin\n", __func__);
 	cur_status = status; /* run - changed to active */
 
 	memset(cal_data, 0, sizeof(struct tfa_cal) * MAX_HANDLES);
 
-	/* run calibration */
-	ret = tfa_run_cal(0, &value);
-	if (ret == TFA98XX_ERROR_NOT_OPEN)
-		return -EINVAL; /* unused device */
-	if (ret) {
-		pr_err("%s: tfa_cal failed to calibrate speaker\n", __func__);
-		return -EINVAL;
-	}
-
-	cur_status = 0; /* done - changed to inactive */
-
 	tfa = tfa98xx_get_tfa_device_from_index(0);
-	if (tfa == NULL)
+	if (tfa == NULL || tfa->dev_count < 1)
 		return -EINVAL; /* unused device */
 
 	ndev = tfa->dev_count;
-	if (ndev < 1)
-		return -EINVAL;
-
-	for (idx = 0; idx < 2; idx++) {
-		/* read data to store */
-		ret = tfa_get_cal_data(idx, &value);
-		if (ret) {
-			pr_info("%s: tfa_cal failed to read data after calibration\n",
-				__func__);
-			continue;
+	for (idx = 0; idx < ndev; idx++) {
+		tfa = tfa98xx_get_tfa_device_from_index(idx);
+		if (tfa && tfa->func == 0) {
+			/* run calibration */
+			ret0 = tfa_run_cal(0); /* tfadsp0 */
+			break;
 		}
-
-		if (value == 0xffff) {
-			pr_info("%s: tfa_cal invalid data\n", __func__);
-			return -EINVAL;
-		}
-
-		cal_data[idx].rdc = value;
-
-		/* read temp to store */
-		ret = tfa_get_cal_temp(idx, &value);
-		if (ret) {
-			pr_info("%s: tfa_cal failed to read temp after calibration\n",
-				__func__);
-			continue;
-		}
-
-		if (value == 0xffff) {
-			pr_info("%s: tfa_cal invalid data\n", __func__);
-			return -EINVAL;
-		}
-
-		cal_data[idx].temp = value;
-
-		pr_info("%s: tfa_cal - dev %d - calibration data (%d, %d)\n",
-			__func__, idx, cal_data[idx].rdc, cal_data[idx].temp);
 	}
-
-	pr_info("%s: tfa_cal tfadsp0 end\n", __func__);
-
-	if (tfa->dev_count < 4 && (tfa->active_handle & 0xC) != 0xC)
-		return size;
-
-	pr_info("%s: tfa_cal tfadsp1 begin\n", __func__);
-
-	cur_status = status; /* run - changed to active */
-
-	/* run calibration */
-	ret = tfa_run_cal(2, &value); /* tfadsp1 */
-	if (ret == TFA98XX_ERROR_NOT_OPEN)
-		return -EINVAL; /* unused device */
-	if (ret) {
-		pr_err("%s: tfa_cal failed to calibrate speaker\n", __func__);
-		return -EINVAL;
+	for (idx = 0; idx < ndev; idx++) {
+		tfa = tfa98xx_get_tfa_device_from_index(idx);
+		if (tfa && tfa->func == 1) {
+			/* run calibration */
+			ret1 = tfa_run_cal(1); /* tfadsp1 */
+			break;
+		}
 	}
-
 	cur_status = 0; /* done - changed to inactive */
 
-	tfa = tfa98xx_get_tfa_device_from_index(2);
-	if (tfa == NULL)
-		return -EINVAL; /* unused device */
-
-	for (idx = 2; idx < ndev; idx++) {
-		/* read data to store */
-		ret = tfa_get_cal_data(idx, &value);
-		if (ret) {
-			pr_info("%s: tfa_cal failed to read data after calibration\n",
-				__func__);
-			continue;
-		}
-
-		if (value == 0xffff) {
-			pr_info("%s: tfa_cal invalid data\n", __func__);
-			return -EINVAL;
-		}
-
-		cal_data[idx].rdc = value;
-
-		/* read temp to store */
-		ret = tfa_get_cal_temp(idx, &value);
-		if (ret) {
-			pr_info("%s: tfa_cal failed to read temp after calibration\n",
-				__func__);
-			continue;
-		}
-
-		if (value == 0xffff) {
-			pr_info("%s: tfa_cal invalid data\n", __func__);
-			return -EINVAL;
-		}
-
-		cal_data[idx].temp = value;
-
-		pr_info("%s: tfa_cal - dev %d - calibration data (%d, %d)\n",
-			__func__, idx, cal_data[idx].rdc, cal_data[idx].temp);
+	if (ret0 || ret1) {
+		pr_err("%s: tfa_cal failed, ret0 %d, ret1 %d\n", 
+			__func__, ret0, ret1);
 	}
 
-	pr_info("%s: tfa_cal tfadsp1 end\n", __func__);
+	for (idx = 0; idx < ndev; idx++) {
+		ret = tfa_get_cal_data(idx, &value);
+		if (ret || value == 0 || value == 0xffff) {
+			/* roll-back to default */
+			tfa = tfa98xx_get_tfa_device_from_index(idx);
+			tfa->mohm[0] = DUMMY_CALIBRATION_DATA;
+			tfa->mtpex = 1;
+			cal_data[idx].rdc = DUMMY_CALIBRATION_DATA;
+			cal_data[idx].temp = DEFAULT_REF_TEMP;
+			tfa->spkr_damaged = 0;
+			continue;
+		}
+		cal_data[idx].rdc = value;
+		tfa_get_cal_temp(idx, &value);
+		cal_data[idx].temp = value;
+		pr_info("%s: tfa%d rdc %d, temp %d\n", __func__, idx,
+			cal_data[idx].rdc, cal_data[idx].temp);
+	}
 
+	pr_info("%s: tfa_cal end\n", __func__);
 	return size;
 }
 

@@ -1396,7 +1396,7 @@ static int tfa98xx_run_calibration(struct tfa98xx *tfa98xx0)
 		temp_val = DEFAULT_REF_TEMP; /* default */
 	}
 
-#if 0 // ToCheck : it may not need
+#if 1 // ToCheck : it may require to avoid the crash in TFADSP
 	if (tfa98xx0->tfa->is_bypass)
 		pr_debug("%s: skipped setting bypass - tfadsp in bypass\n",
 			__func__);
@@ -1495,9 +1495,6 @@ static int tfa98xx_run_calibration(struct tfa98xx *tfa98xx0)
 			pr_warn("[0x%x] failure in starting device for calibration! (err %d)\n",
 				tfa98xx->i2c->addr, ret);
 			cal_err |= ret;
-		} else {
-			if (idx == 0 || idx == 2) /* to avoid reset in the tfa_restore_after_cal */
-				tfa_set_status_flag(tfa98xx->tfa, TFA_SET_DEVICE, 1);
 		}
 
 		pr_debug("%s: [%d] force UNMUTE before calibration\n",
@@ -3286,7 +3283,7 @@ int ipi_tfadsp_read(void *tfa, int length, unsigned char *bytes)
 {
 	enum tfa98xx_error err = TFA98XX_ERROR_OK;
 	int ret = 0;
-	uint32_t buf_len;
+	uint32_t buf_len = 0;
 
 	if (bytes == NULL) {
 		pr_err("%s: error with NULL buffer\n", __func__);
@@ -3302,7 +3299,7 @@ int ipi_tfadsp_read(void *tfa, int length, unsigned char *bytes)
 	}
 
 	if (length >= 3)
-		pr_debug("%s: [0]:0x%02x-[1]:0x%02x-[2]:0x%02x, length:%d, buf_len:%d\n",
+		pr_info("%s: [0]:0x%02x-[1]:0x%02x-[2]:0x%02x, length:%d, buf_len:%d\n",
 			__func__, bytes[0], bytes[1], bytes[2],
 			length, buf_len);
 
@@ -4191,12 +4188,12 @@ static int _tfa98xx_mute(struct tfa98xx *tfa98xx, int mute, int stream)
 		cancel_delayed_work_sync(&tfa98xx->monitor_work);
 
 		/* report the status if interrupt is not enabled */
+		/* Not necessary in the stop sequence
 		if (!gpio_is_valid(tfa98xx->irq_gpio)) {
 			mutex_lock(&tfa98xx->dsp_lock);
 			tfaxx_status(tfa98xx->tfa);
 			mutex_unlock(&tfa98xx->dsp_lock);
-		}
-
+		} */
 		_tfa98xx_stop(tfa98xx);
 	} else {
 		if (stream == SNDRV_PCM_STREAM_PLAYBACK)
@@ -5440,18 +5437,29 @@ int tfa98xx_count_active_stream(int stream_flag)
 	return stream_counter;
 }
 
-enum tfa98xx_error tfa_run_cal(int index, uint16_t *value)
+enum tfa98xx_error tfa_run_cal(int tfadsp_idx)
 {
-	struct tfa_device *tfa = tfa98xx_get_tfa_device_from_index(index);
+	struct tfa_device *tfa;
 	struct tfa98xx *tfa98xx;
 	int ret = 0;
-	int mtpex = 0, cal_result = 0;
+	int mtpex = 0;
 	int tries = 0;
+	int idx, ndev;
 
+	tfa = tfa98xx_get_tfa_device_from_index(-1);
 	if (!tfa)
 		return TFA98XX_ERROR_NOT_OPEN;
 
+	ndev = tfa->dev_count;
+	for (idx = 0; idx < ndev; idx++) {
+		tfa = tfa98xx_get_tfa_device_from_index(idx);
+		if (tfa && tfa->func == tfadsp_idx)
+			break;
+	}
 	tfa98xx = (struct tfa98xx *)tfa->data;
+
+	pr_info("%s: dev_idx %d, tfadsp_idx %d\n",
+			__func__, tfa->dev_idx, tfadsp_idx);
 
 	/* check if calibration already runs */
 	tfa_wait_until_calibration_done(tfa);
@@ -5462,31 +5470,16 @@ enum tfa98xx_error tfa_run_cal(int index, uint16_t *value)
 
 	tfa_wait_until_calibration_done(tfa);
 
-	if (value == NULL)
-		return TFA98XX_ERROR_BAD_PARAMETER;
-
 	while (tries < TFA98XX_API_REWRTIE_MTP_NTRIES) {
-		msleep_interruptible(CAL_STATUS_INTERVAL);
 		mtpex = tfa_dev_mtp_get(tfa, TFA_MTP_EX);
 		if (mtpex != 0) {
-			msleep_interruptible(CAL_STATUS_INTERVAL);
 			break;
 		}
+		msleep_interruptible(CAL_STATUS_INTERVAL);
 		tries++;
 	}
-	mtpex = tfa_dev_mtp_get(tfa, TFA_MTP_EX);
 	if (mtpex != 1)
 		return TFA98XX_ERROR_FAIL;
-
-	cal_result = tfa_dev_mtp_get(tfa, TFA_MTP_RE25);
-	*value = (uint16_t)cal_result;
-	if (cal_result < 0) {
-		pr_info("%s: calibration data is not valid\n",
-			__func__);
-		*value = 0xffff;
-		tfa->temp = 0xffff;
-		return TFA98XX_ERROR_FAIL;
-	}
 
 	return TFA98XX_ERROR_OK;
 }
