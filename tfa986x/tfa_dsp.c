@@ -5179,7 +5179,7 @@ enum tfa98xx_error tfa_update_log2(void)
 	int ndev, idx, offset, group;
 	uint8_t cmd_buf[(2 + (TFA_LOG2_MAX_COUNT * MAX_HANDLES)) * 3] = { 0 };
 	int data[2 + (TFA_LOG2_MAX_COUNT * MAX_HANDLES)] = { 0 };
-	int read_size;
+	int read_size, convert_size;
 
 	/* set head device */
 	tfa = tfa98xx_get_tfa_device_from_index(-1);
@@ -5198,6 +5198,7 @@ enum tfa98xx_error tfa_update_log2(void)
 	pr_info("%s: read from blackbox\n", __func__);
 
 	read_size = ((TFA_LOG2_MAX_COUNT * 2) + 1) * 3;
+	convert_size = read_size;
 
 	if ((tfa->active_handle & 0x3) == 0x3) {
 		ntfa = tfa98xx_get_tfa_device_from_index(0);
@@ -5212,6 +5213,7 @@ enum tfa98xx_error tfa_update_log2(void)
 			err2 = tfa_dsp_cmd_id_write_read(ntfa, MODULE_SPEAKERBOOST,
 				SB_PARAM_GET_DATA_LOGGER2, read_size,
 				&cmd_buf[(1 + (TFA_LOG2_MAX_COUNT * 2)) * 3]);
+			convert_size += read_size;
 		}
 	}
 	if (err && err2) {
@@ -5220,7 +5222,7 @@ enum tfa98xx_error tfa_update_log2(void)
 		return err;
 	}
 
-	tfa98xx_convert_bytes2data(read_size, cmd_buf, data);
+	tfa98xx_convert_bytes2data(convert_size, cmd_buf, data);
 	pr_info("%s: DataLogger command version 0x%x\n", __func__, data[0]);
 	if ((data[0] & 0xFFFFFF) != 0x800001) {
 		pr_err("%s: DataLogger version is wrong\n", __func__);
