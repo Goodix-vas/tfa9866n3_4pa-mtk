@@ -2295,9 +2295,9 @@ int tfa_tib_dsp_msgmulti(struct tfa_device *tfa,
 			blob[idx][5] = 0x80 | MODULE_FRAMEWORK;
 			blob[idx][6] = 0x0;
 			blob[idx][7] = 0x0;
-			pr_debug("%s: multi-msg(tfadsp%d) (index %d) [0]=0x%x-[1]=0x%x-[2]=0x%x\n",
-				__func__, tfa->tfadsp_handle, idx,
-				blob[idx][4], blob[idx][5], blob[idx][6]);
+			pr_debug("%s: multi-msg(tfadsp%d) (index %d) [8]=0x%x-[9]=0x%x-[10]=0x%x\n",
+				__func__, blob[idx][0], idx,
+				blob[idx][8], blob[idx][9], blob[idx][10]);
 		} else {
 			blob[idx][0] = 0x0;
 			blob[idx][1] = 0x0;
@@ -2321,9 +2321,9 @@ int tfa_tib_dsp_msgmulti(struct tfa_device *tfa,
 			blob[idx][1] = 0x80 | MODULE_FRAMEWORK;
 			blob[idx][2] = FW_PAR_ID_SET_MULTI_MESSAGE;
 		}
-		pr_debug("%s: multi-msg(tfadsp%d) (index %d) [0]=0x%x-[1]=0x%x-[2]=0x%x\n",
-			__func__, tfa->tfadsp_handle, idx,
-			blob[idx][0], blob[idx][1], blob[idx][2]);
+		pr_debug("%s: multi-msg(tfadsp%d) (index %d) [4]=0x%x-[5]=0x%x-[6]=0x%x\n",
+			__func__, blob[idx][0], idx,
+			blob[idx][4], blob[idx][5], blob[idx][6]);
 		blobptr[idx] = blob[idx];
 		blobptr[idx] += len_word_in_bytes;
 		total[idx] = len_word_in_bytes;
