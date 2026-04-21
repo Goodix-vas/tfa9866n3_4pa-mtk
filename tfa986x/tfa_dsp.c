@@ -904,7 +904,7 @@ tfa98xx_check_ic_rom_version(struct tfa_device *tfa,
 			/* full revid */
 			if (devid != tfa->revid && revid != tfa->revid) {
 				/* TFA9866 N3Var is compatible to N3A1 CNT */
-				if (tfa->revid == 0x202a66) { /* HW : TFA9866 N3Var */
+				if (tfa->revid == 0x202a66) { /* HW : TFA9866 N3Var = N3A2(DEVREV=34) */
 					if (devid == 0x201a66 || revid == 0x201a66) { /* CNT : TFA9866 N3A1 */
 						pr_info("%s: TFA9866 N3Var container patch: 0x%08x:0x%08x\n",
 							__func__, revid, devid);

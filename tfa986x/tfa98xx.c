@@ -945,6 +945,9 @@ static ssize_t tfa98xx_dbgfs_memtrack_read(struct file *file,
 	char memtrack_str[(MAX_MEMTRACK_ITEMS+1)*10] = {0};
 	int max_mm_str_len = (MAX_MEMTRACK_ITEMS+1)*10;
 
+	if (*ppos != 0)
+		return 0;
+
 	if (tfa98xx->tfa == NULL) {
 		pr_err("[0x%x] tfa is not available\n", tfa98xx->i2c->addr);
 		return -ENODEV;
@@ -1011,7 +1014,7 @@ static ssize_t tfa98xx_dbgfs_memtrack_send(struct file *file,
 	}
 	tfa = tfa98xx->tfa;
 
-	pr_info("[0x%x] count %d\n", tfa98xx->i2c->addr, count);
+	pr_info("[0x%x] count %zu\n", tfa98xx->i2c->addr, count);
 
 	if (count == 0)
 		return 0;
@@ -1066,6 +1069,7 @@ static ssize_t tfa98xx_dbgfs_memtrack_send(struct file *file,
 	}
 
 	mutex_lock(&tfa98xx->dsp_lock);
+	tfa->individual_msg = 1;
 	error = dsp_msg(tfa, buf24_len, buf24);
 	if (error != TFA98XX_ERROR_OK)
 		pr_err("[0x%x] dsp_msg error: %d\n", tfa98xx->i2c->addr, error);

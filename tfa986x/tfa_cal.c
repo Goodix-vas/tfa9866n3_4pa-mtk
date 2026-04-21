@@ -15,29 +15,29 @@
 
 /* ---------------------------------------------------------------------- */
 
-static ssize_t rdc0_show(struct device *dev,
+static ssize_t SPK1_show(struct device *dev,
 	struct device_attribute *attr, char *buf);
-static ssize_t rdc0_store(struct device *dev,
+static ssize_t SPK1_store(struct device *dev,
 	struct device_attribute *attr, const char *buf, size_t size);
-static DEVICE_ATTR_RW(rdc0);
+static DEVICE_ATTR_RW(SPK1);
 
-static ssize_t rdc1_show(struct device *dev,
+static ssize_t SPK2_show(struct device *dev,
 	struct device_attribute *attr, char *buf);
-static ssize_t rdc1_store(struct device *dev,
+static ssize_t SPK2_store(struct device *dev,
 	struct device_attribute *attr, const char *buf, size_t size);
-static DEVICE_ATTR_RW(rdc1);
+static DEVICE_ATTR_RW(SPK2);
 
-static ssize_t rdc2_show(struct device *dev,
+static ssize_t SPK3_show(struct device *dev,
 	struct device_attribute *attr, char *buf);
-static ssize_t rdc2_store(struct device *dev,
+static ssize_t SPK3_store(struct device *dev,
 	struct device_attribute *attr, const char *buf, size_t size);
-static DEVICE_ATTR_RW(rdc2);
+static DEVICE_ATTR_RW(SPK3);
 
-static ssize_t rdc3_show(struct device *dev,
+static ssize_t SPK4_show(struct device *dev,
 	struct device_attribute *attr, char *buf);
-static ssize_t rdc3_store(struct device *dev,
+static ssize_t SPK4_store(struct device *dev,
 	struct device_attribute *attr, const char *buf, size_t size);
-static DEVICE_ATTR_RW(rdc3);
+static DEVICE_ATTR_RW(SPK4);
 
 static ssize_t temp0_show(struct device *dev,
 	struct device_attribute *attr, char *buf);
@@ -82,10 +82,10 @@ static ssize_t reinit_store(struct device *dev,
 static DEVICE_ATTR(reinit, 0664, reinit_show, reinit_store);
 
 static struct attribute *tfa_cal_attr[] = {
-	&dev_attr_rdc0.attr,
-	&dev_attr_rdc1.attr,
-	&dev_attr_rdc2.attr,
-	&dev_attr_rdc3.attr,
+	&dev_attr_SPK1.attr,
+	&dev_attr_SPK2.attr,
+	&dev_attr_SPK3.attr,
+	&dev_attr_SPK4.attr,
 	&dev_attr_temp0.attr,
 	&dev_attr_temp1.attr,
 	&dev_attr_temp2.attr,
@@ -209,7 +209,7 @@ static ssize_t update_temp_status(int idx, char *buf)
 	return size;
 }
 
-static ssize_t rdc0_show(struct device *dev,
+static ssize_t SPK1_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
 	int idx = tfa_get_dev_idx_from_inchannel(0);
@@ -226,7 +226,7 @@ static ssize_t rdc0_show(struct device *dev,
 	return ret;
 }
 
-static ssize_t rdc0_store(struct device *dev,
+static ssize_t SPK1_store(struct device *dev,
 	struct device_attribute *attr, const char *buf, size_t size)
 {
 	int idx = tfa_get_dev_idx_from_inchannel(0);
@@ -248,7 +248,7 @@ static ssize_t rdc0_store(struct device *dev,
 	return size;
 }
 
-static ssize_t rdc1_show(struct device *dev,
+static ssize_t SPK2_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
 	int idx = tfa_get_dev_idx_from_inchannel(1);
@@ -265,7 +265,7 @@ static ssize_t rdc1_show(struct device *dev,
 	return ret;
 }
 
-static ssize_t rdc1_store(struct device *dev,
+static ssize_t SPK2_store(struct device *dev,
 	struct device_attribute *attr, const char *buf, size_t size)
 {
 	int idx = tfa_get_dev_idx_from_inchannel(1);
@@ -287,7 +287,7 @@ static ssize_t rdc1_store(struct device *dev,
 	return size;
 }
 
-static ssize_t rdc2_show(struct device *dev,
+static ssize_t SPK3_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
 	int idx = tfa_get_dev_idx_from_inchannel(2);
@@ -304,7 +304,7 @@ static ssize_t rdc2_show(struct device *dev,
 	return ret;
 }
 
-static ssize_t rdc2_store(struct device *dev,
+static ssize_t SPK3_store(struct device *dev,
 	struct device_attribute *attr, const char *buf, size_t size)
 {
 	int idx = tfa_get_dev_idx_from_inchannel(2);
@@ -326,7 +326,7 @@ static ssize_t rdc2_store(struct device *dev,
 	return size;
 }
 
-static ssize_t rdc3_show(struct device *dev,
+static ssize_t SPK4_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
 	int idx = tfa_get_dev_idx_from_inchannel(3);
@@ -343,7 +343,7 @@ static ssize_t rdc3_show(struct device *dev,
 	return ret;
 }
 
-static ssize_t rdc3_store(struct device *dev,
+static ssize_t SPK4_store(struct device *dev,
 	struct device_attribute *attr, const char *buf, size_t size)
 {
 	int idx = tfa_get_dev_idx_from_inchannel(3);
