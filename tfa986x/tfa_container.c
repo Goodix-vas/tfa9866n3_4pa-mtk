@@ -1756,10 +1756,6 @@ enum tfa98xx_error tfa_cont_write_profile(struct tfa_device *tfa,
 				break;
 			if (tfa_cont_is_config_loaded(tfa))
 				break;
-			if (tfa->skip_profile_config == 1) { /* set by tfa_restore_after_cal */
-				pr_debug("%s: skip tfadsp config in profile\n", __func__);
-				break;
-			}
 
 			file = (struct tfa_file_dsc *)
 				(prof_tfadsp->list[i].offset
@@ -1783,10 +1779,6 @@ enum tfa98xx_error tfa_cont_write_profile(struct tfa_device *tfa,
 				break;
 			if (tfa_cont_is_config_loaded(tfa))
 				break;
-			if (tfa->skip_profile_config == 1) { /* set by tfa_restore_after_cal */
-				pr_debug("%s: skip tfadsp config in profile\n", __func__);
-				break;
-			}
 
 			create_dsp_buffer_msg(tfa,
 				(struct tfa_msg *)
@@ -1813,10 +1805,6 @@ enum tfa98xx_error tfa_cont_write_profile(struct tfa_device *tfa,
 				break;
 			if (tfa_cont_is_config_loaded(tfa))
 				break;
-			if (tfa->skip_profile_config == 1) { /* set by tfa_restore_after_cal */
-				pr_debug("%s: skip tfadsp config in profile\n", __func__);
-				break;
-			}
 
 			pcmd = (prof_tfadsp->list[i].offset
 				+ (char *)tfa->cnt);

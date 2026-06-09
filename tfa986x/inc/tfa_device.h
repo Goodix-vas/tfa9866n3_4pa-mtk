@@ -227,7 +227,6 @@ struct tfa_device {
 	int tfadsp_handle;
 	int func;
 	unsigned int stc_off;
-	int skip_profile_config;
 };
 
 /*

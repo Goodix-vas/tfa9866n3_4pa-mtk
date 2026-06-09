@@ -904,7 +904,7 @@ tfa98xx_check_ic_rom_version(struct tfa_device *tfa,
 			/* full revid */
 			if (devid != tfa->revid && revid != tfa->revid) {
 				/* TFA9866 N3Var is compatible to N3A1 CNT */
-				if (tfa->revid == 0x202a66) { /* HW : TFA9866 N3Var = N3A2(DEVREV=34) */
+				if (tfa->revid == 0x202a66) { /* HW : TFA9866 N3Var */
 					if (devid == 0x201a66 || revid == 0x201a66) { /* CNT : TFA9866 N3A1 */
 						pr_info("%s: TFA9866 N3Var container patch: 0x%08x:0x%08x\n",
 							__func__, revid, devid);
@@ -3079,19 +3079,30 @@ void tfa_restore_after_cal(int index, int cal_err)
 				__func__, ntfa->dev_idx,
 				active_profile, ntfa->next_profile);
 
-			/* switch profile with the entire setting */
-			pr_info("%s: apply the whole profile setting at done\n",
-				__func__);
+			/* switch profile */
+			if (cal_err != TFA98XX_ERROR_OK) {
+				/* only with register setting at failure */
+				pr_info("%s: apply only register setting at failure\n",
+					__func__);
 
-			if (ntfa->dev_idx % 2 == 0) /* to send profile parameter once */
-				ntfa->skip_profile_config = 1;
+				err = tfa_cont_write_regs_prof(ntfa,
+					ntfa->next_profile);
+				if (err != TFA98XX_ERROR_OK)
+					pr_err("%s: error in writing regs (%d)\n",
+						__func__, err);
+				else if (TFA_GET_BF(ntfa, PWDN) != 0)
+					err = tfa98xx_powerdown(ntfa, 0);
+			} else {
+				/* with the entire setting at success */
+				pr_info("%s: apply the whole profile setting at done\n",
+					__func__);
 
-			ret = tfa_dev_switch_profile(ntfa,
-				ntfa->next_profile, ntfa->vstep);
-			if (ret != tfa_error_ok)
-				pr_err("%s: error in switch profile (%d)\n",
-					__func__, ret);
-			ntfa->skip_profile_config = 0;
+				ret = tfa_dev_switch_profile(ntfa,
+					ntfa->next_profile, ntfa->vstep);
+				if (ret != tfa_error_ok)
+					pr_err("%s: error in switch profile (%d)\n",
+						__func__, ret);
+			}
 		}
 
 		/* reset counter */
@@ -3105,13 +3116,11 @@ void tfa_restore_after_cal(int index, int cal_err)
 		if (ntfa == NULL || !tfa_is_active_device(ntfa))
 			continue;
 
-		/*
-		// not required this handling
 		if (cal_err != TFA98XX_ERROR_OK
 			|| ntfa->spkr_damaged) {
 			tfa_handle_damaged_speakers(ntfa);
 			continue;
-		} */
+		}
 
 		tfa_set_spkgain(ntfa);
 		/* force UNMUTE after processing calibration */
