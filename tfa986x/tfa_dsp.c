@@ -2989,14 +2989,16 @@ enum tfa98xx_error tfa_wait_cal(struct tfa_device *tfa)
 		if (!tfa_is_active_device(ntfa))
 			continue;
 
-		if (ntfa->spkr_damaged)
-			continue;
-
 		pr_debug("%s: [%d] process calibration data\n",
 			__func__, ntfa->dev_idx);
-		err = tfa_dsp_get_calibration_impedance(ntfa);
-		if (err != TFA98XX_ERROR_OK)
-			PRINT_ASSERT(err);
+		if (cal_err == TFA98XX_ERROR_STATE_TIMED_OUT) {
+			ntfa->mtpex = 1;
+			ntfa->mohm[0] = -128000;
+		} else {
+			err = tfa_dsp_get_calibration_impedance(ntfa);
+			if (err != TFA98XX_ERROR_OK)
+				PRINT_ASSERT(err);
+		}
 	}
 
 	/* it's called twice for dev_idx 0 and 2 */
@@ -3250,8 +3252,7 @@ tfa_run_wait_calibration(struct tfa_device *tfa, int *calibrate_done)
 			*calibrate_done = 1;
 
 			if ((dsp_status & 0x6) != 0) /* damage status */
-				damaged = tfa_run_damage_check(tfa,
-					dsp_event, dsp_status);
+				damaged = 1;
 
 			if (damaged)
 				*calibrate_done = 0; /* failure */
@@ -3309,14 +3310,6 @@ tfa_run_wait_calibration(struct tfa_device *tfa, int *calibrate_done)
 			continue;
 
 		ntfa->is_calibrating = 0;
-		ntfa->spkr_damaged
-			= (TFA_GET_BIT_VALUE(fw_status[1], i + 1))
-			? 1 : 0;
-		if (ntfa->spkr_damaged)
-			pr_info("%s: speaker damage is detected [%s] (dev %d, channel %d)\n",
-				__func__,
-				tfa_cont_device_name(ntfa->cnt, ntfa->dev_idx),
-				ntfa->dev_idx, i);
 	}
 
 	return err;
@@ -4044,18 +4037,6 @@ static enum tfa98xx_error tfa_process_re25(struct tfa_device *tfa)
 
 				pr_info("%s: %d mOhms\n", __func__, ntfa->mohm[cal_idx]);
 				/* special case for stereo calibration, from SB 3.5 PRC1 */
-				if (ntfa->mohm[cal_idx] == -128000) {
-					pr_err("%s: wrong calibration! (damaged speaker)\n",
-						__func__);
-					ntfa->spkr_damaged = 1;
-				}
-				/* set RE25 */
-				ret = tfa_dev_mtp_set(ntfa,
-					TFA_MTP_RE25, ntfa->mohm[cal_idx]);
-				if (ret != tfa_error_ok) {
-					pr_err("%s: writing calibration data failed to MTP, device %d err (%d)\n",
-						__func__, ntfa->dev_idx, ret);
-				}
 				/* set MTPEX */
 				ret = tfa_dev_mtp_set(ntfa, TFA_MTP_EX, 1);
 				if (ret != tfa_error_ok) {

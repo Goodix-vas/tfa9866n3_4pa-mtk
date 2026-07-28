@@ -550,17 +550,7 @@ static ssize_t status_store(struct device *dev,
 	}
 
 	for (idx = 0; idx < ndev; idx++) {
-		ret = tfa_get_cal_data(idx, &value);
-		if (ret || value == 0 || value == 0xffff) {
-			/* roll-back to default */
-			tfa = tfa98xx_get_tfa_device_from_index(idx);
-			tfa->mohm[0] = DUMMY_CALIBRATION_DATA;
-			tfa->mtpex = 1;
-			cal_data[idx].rdc = DUMMY_CALIBRATION_DATA;
-			cal_data[idx].temp = DEFAULT_REF_TEMP;
-			tfa->spkr_damaged = 0;
-			continue;
-		}
+		tfa_get_cal_data(idx, &value);
 		cal_data[idx].rdc = value;
 		tfa_get_cal_temp(idx, &value);
 		cal_data[idx].temp = value;
