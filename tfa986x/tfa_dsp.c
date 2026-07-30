@@ -4604,11 +4604,6 @@ enum tfa_error tfa_dev_mtp_set(struct tfa_device *tfa,
 		if (value == 0) {
 			tfa->mohm[0] = 0;
 			tfa->reset_mtpex = 0;
-		} else {
-			if (tfa->mohm[0] <= 0) {
-				rdc = 6000; /* hard-coded */
-				tfa->mohm[0] = rdc;
-			}
 		}
 		tfa->mtpex = value;
 		break;

@@ -142,6 +142,8 @@ static ssize_t update_rdc_status(int idx, char *buf)
 			pr_info("%s: tfa_cal read wrong data from amplifier\n",
 				__func__);
 		cal_data[idx].rdc = value;
+		pr_info("%s: cal_data[%d].rdc = %d\n",
+				__func__, idx, cal_data[idx].rdc);
 	}
 
 	snprintf(cal_result, FILESIZE_CAL,

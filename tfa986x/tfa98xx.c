@@ -5641,27 +5641,16 @@ EXPORT_SYMBOL(tfa_run_cal);
 enum tfa98xx_error tfa_get_cal_data(int index, uint16_t *value)
 {
 	struct tfa_device *tfa = tfa98xx_get_tfa_device_from_index(index);
-	int mtp = 0, mtpex = 0;
+	int mtp = 0;
 
 	if (!tfa)
 		return TFA98XX_ERROR_NOT_OPEN;
 
-	mtp = tfa_dev_mtp_get(tfa, TFA_MTP_RE25);
-	mtpex = tfa_dev_mtp_get(tfa, TFA_MTP_EX);
-
 	if (value == NULL)
 		return TFA98XX_ERROR_BAD_PARAMETER;
-	if (mtpex != 1)
-		return TFA98XX_ERROR_FAIL;
 
+	mtp = tfa_dev_mtp_get(tfa, TFA_MTP_RE25);
 	*value = (uint16_t)mtp;
-	if (mtp < 0) {
-		pr_info("%s: calibration data is not valid\n",
-			__func__);
-		*value = 0xffff;
-		tfa->temp = 0xffff;
-		return TFA98XX_ERROR_FAIL;
-	}
 
 	return TFA98XX_ERROR_OK;
 }
